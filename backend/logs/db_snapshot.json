@@ -1,0 +1,206 @@
+﻿{
+    "ports":  [
+                  {
+                      "id":  4,
+                      "lat":  40.700000000000003,
+                      "lon":  -74.0,
+                      "name":  "New York",
+                      "region":  "America"
+                  },
+                  {
+                      "id":  5,
+                      "lat":  31.199999999999999,
+                      "lon":  121.5,
+                      "name":  "Shanghai",
+                      "region":  "Asia"
+                  },
+                  {
+                      "id":  2,
+                      "lat":  53.5,
+                      "lon":  9.9000000000000004,
+                      "name":  "Hamburg",
+                      "region":  "Europe"
+                  },
+                  {
+                      "id":  3,
+                      "lat":  46.399999999999999,
+                      "lon":  30.699999999999999,
+                      "name":  "Odessa",
+                      "region":  "Europe"
+                  },
+                  {
+                      "id":  1,
+                      "lat":  51.899999999999999,
+                      "lon":  4.4000000000000004,
+                      "name":  "Rotterdam",
+                      "region":  "Europe"
+                  }
+              ],
+    "ship_types":  [
+                       {
+                           "code":  "cargo",
+                           "description":  "General cargo / container",
+                           "id":  1,
+                           "name":  "Cargo"
+                       },
+                       {
+                           "code":  "military",
+                           "description":  "Warship / patrol",
+                           "id":  2,
+                           "name":  "Military"
+                       },
+                       {
+                           "code":  "passenger",
+                           "description":  "Ferry / cruise",
+                           "id":  3,
+                           "name":  "Passenger"
+                       },
+                       {
+                           "code":  "tanker",
+                           "description":  "Oil / LNG / chemical",
+                           "id":  4,
+                           "name":  "Tanker"
+                       },
+                       {
+                           "code":  "tug",
+                           "description":  "Harbor tug / service",
+                           "id":  5,
+                           "name":  "Tug"
+                       },
+                       {
+                           "code":  "research",
+                           "description":  "Oceanographic / survey",
+                           "id":  6,
+                           "name":  "Research"
+                       }
+                   ],
+    "people":  {
+                   "active":  true,
+                   "full_name":  "Jack Sparrow",
+                   "id":  1,
+                   "rank":  "Captain"
+               },
+    "companies":  [
+                      {
+                          "id":  1,
+                          "name":  "Black Pearl Logistics"
+                      },
+                      {
+                          "id":  2,
+                          "name":  "Test Co"
+                      }
+                  ],
+    "companies_ports":  {
+                            "2":  {
+
+                                  },
+                            "1":  {
+                                      "id":  2,
+                                      "lat":  53.5,
+                                      "lon":  9.9000000000000004,
+                                      "name":  "Hamburg",
+                                      "region":  "Europe"
+                                  }
+                        },
+    "companies_ships":  {
+                            "1":  [
+                                      {
+                                          "company_id":  1,
+                                          "country":  "Ukraine",
+                                          "id":  2,
+                                          "name":  "Mriya Sea",
+                                          "port_id":  3,
+                                          "status":  "docked",
+                                          "type":  "Cargo"
+                                      }
+                                  ]
+                        },
+    "ships":  [
+                  {
+                      "company_id":  0,
+                      "country":  "Ukraine",
+                      "id":  1,
+                      "name":  "Hetman Sahaydachny",
+                      "port_id":  3,
+                      "status":  "docked",
+                      "type":  "Military"
+                  },
+                  {
+                      "company_id":  1,
+                      "country":  "Ukraine",
+                      "id":  2,
+                      "name":  "Mriya Sea",
+                      "port_id":  3,
+                      "status":  "docked",
+                      "type":  "Cargo"
+                  },
+                  {
+                      "company_id":  0,
+                      "country":  "USA",
+                      "id":  3,
+                      "name":  "USS Enterprise",
+                      "port_id":  4,
+                      "status":  "docked",
+                      "type":  "Military"
+                  },
+                  {
+                      "company_id":  0,
+                      "country":  "USA",
+                      "id":  4,
+                      "name":  "Liberty Star",
+                      "port_id":  4,
+                      "status":  "docked",
+                      "type":  "Passenger"
+                  },
+                  {
+                      "company_id":  0,
+                      "country":  "China",
+                      "id":  5,
+                      "name":  "Cosco Hope",
+                      "port_id":  5,
+                      "status":  "docked",
+                      "type":  "Cargo"
+                  },
+                  {
+                      "company_id":  0,
+                      "country":  "China",
+                      "id":  6,
+                      "name":  "Red Dragon",
+                      "port_id":  5,
+                      "status":  "docked",
+                      "type":  "Military"
+                  },
+                  {
+                      "company_id":  0,
+                      "country":  "Germany",
+                      "id":  7,
+                      "name":  "Euro Queen",
+                      "port_id":  2,
+                      "status":  "docked",
+                      "type":  "Passenger"
+                  }
+              ],
+    "crew_by_ship":  {
+                         "7":  {
+
+                               },
+                         "6":  {
+
+                               },
+                         "5":  {
+
+                               },
+                         "4":  {
+
+                               },
+                         "3":  {
+
+                               },
+                         "2":  {
+
+                               },
+                         "1":  {
+
+                               }
+                     }
+}

@@ -1,0 +1,13 @@
+﻿{
+  "app": {
+    "threads_num": 1,
+    "document_root": "./public",
+    "upload_path": "./uploads",
+    "log_path": "./logs",
+    "log_level": "TRACE"
+  },
+  "listeners": [
+    { "address": "127.0.0.1", "port": 8081 }
+  ],
+  "ssl": { "use_ssl": false }
+}

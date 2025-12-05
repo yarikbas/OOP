@@ -1,0 +1,10 @@
+{
+  "name": "oop-backend",
+  "version-string": "0.1.0",
+  "dependencies": [
+    "drogon",
+    "nlohmann-json",
+    "sqlite3",
+    "gtest"
+  ]
+}

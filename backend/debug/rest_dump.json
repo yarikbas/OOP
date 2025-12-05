@@ -1,0 +1,154 @@
+﻿{
+    "health":  "{\"status\":\"ok\"}",
+    "ports":  {
+                  "value":  [
+                                {
+                                    "id":  4,
+                                    "lat":  40.700000000000003,
+                                    "lon":  -74.0,
+                                    "name":  "New York",
+                                    "region":  "America"
+                                },
+                                {
+                                    "id":  5,
+                                    "lat":  31.199999999999999,
+                                    "lon":  121.5,
+                                    "name":  "Shanghai",
+                                    "region":  "Asia"
+                                },
+                                {
+                                    "id":  2,
+                                    "lat":  53.5,
+                                    "lon":  9.9000000000000004,
+                                    "name":  "Hamburg",
+                                    "region":  "Europe"
+                                },
+                                {
+                                    "id":  3,
+                                    "lat":  46.399999999999999,
+                                    "lon":  30.699999999999999,
+                                    "name":  "Odessa",
+                                    "region":  "Europe"
+                                },
+                                {
+                                    "id":  1,
+                                    "lat":  51.899999999999999,
+                                    "lon":  4.4000000000000004,
+                                    "name":  "Rotterdam",
+                                    "region":  "Europe"
+                                }
+                            ],
+                  "Count":  5
+              },
+    "ships":  {
+                  "value":  [
+                                {
+                                    "country":  "Ukraine",
+                                    "id":  1,
+                                    "name":  "Hetman Sahaydachny",
+                                    "port_id":  3,
+                                    "status":  "docked",
+                                    "type":  "Military"
+                                },
+                                {
+                                    "country":  "Ukraine",
+                                    "id":  2,
+                                    "name":  "Mriya Sea",
+                                    "port_id":  3,
+                                    "status":  "docked",
+                                    "type":  "Cargo"
+                                },
+                                {
+                                    "country":  "USA",
+                                    "id":  3,
+                                    "name":  "USS Enterprise",
+                                    "port_id":  4,
+                                    "status":  "docked",
+                                    "type":  "Military"
+                                },
+                                {
+                                    "country":  "USA",
+                                    "id":  4,
+                                    "name":  "Liberty Star",
+                                    "port_id":  4,
+                                    "status":  "docked",
+                                    "type":  "Passenger"
+                                },
+                                {
+                                    "country":  "China",
+                                    "id":  5,
+                                    "name":  "Cosco Hope",
+                                    "port_id":  5,
+                                    "status":  "docked",
+                                    "type":  "Cargo"
+                                },
+                                {
+                                    "country":  "China",
+                                    "id":  6,
+                                    "name":  "Red Dragon",
+                                    "port_id":  5,
+                                    "status":  "docked",
+                                    "type":  "Military"
+                                },
+                                {
+                                    "country":  "Germany",
+                                    "id":  7,
+                                    "name":  "Euro Queen",
+                                    "port_id":  2,
+                                    "status":  "docked",
+                                    "type":  "Passenger"
+                                }
+                            ],
+                  "Count":  7
+              },
+    "people":  {
+                   "value":  [
+
+                             ],
+                   "Count":  0
+               },
+    "ship_types":  {
+                       "value":  [
+                                     {
+                                         "code":  "cargo",
+                                         "description":  "General cargo / container",
+                                         "id":  1,
+                                         "name":  "Cargo"
+                                     },
+                                     {
+                                         "code":  "military",
+                                         "description":  "Warship / patrol",
+                                         "id":  2,
+                                         "name":  "Military"
+                                     },
+                                     {
+                                         "code":  "passenger",
+                                         "description":  "Ferry / cruise",
+                                         "id":  3,
+                                         "name":  "Passenger"
+                                     },
+                                     {
+                                         "code":  "tanker",
+                                         "description":  "Oil / LNG / chemical",
+                                         "id":  4,
+                                         "name":  "Tanker"
+                                     },
+                                     {
+                                         "code":  "tug",
+                                         "description":  "Harbor tug / service",
+                                         "id":  5,
+                                         "name":  "Tug"
+                                     },
+                                     {
+                                         "code":  "research",
+                                         "description":  "Oceanographic / survey",
+                                         "id":  6,
+                                         "name":  "Research"
+                                     }
+                                 ],
+                       "Count":  6
+                   },
+    "crew":  [
+
+             ]
+}

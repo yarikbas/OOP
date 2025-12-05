@@ -1,0 +1,13 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build oop_backend (Release)",
+      "type": "shell",
+      "command": "cmake",
+      "args": ["--build", "${workspaceFolder}\\backend\\build", "--config", "Release"],
+      "group": "build",
+      "problemMatcher": ["$msCompile"]
+    }
+  ]
+}
