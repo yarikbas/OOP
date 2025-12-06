@@ -90,13 +90,22 @@ def _url(path: str) -> str:
     return BASE_URL + path
 
 
-def api_get(path: str):
+def api_get(path: str, *, expect_json: bool = True):
     url = _url(path)
     resp = _SESSION.get(url, timeout=5)
     resp.raise_for_status()
     if not resp.text:
         return None
-    return resp.json()
+
+    if not expect_json:
+        return resp.text
+
+    try:
+        return resp.json()
+    except ValueError:
+        # Деякі ендпоінти (наприклад старий /health) могли повертати plain text.
+        # Повертаємо сирий текст, щоб не падати на JSONDecodeError.
+        return {"raw": resp.text}
 
 
 def api_post(path: str, payload: dict, success_msg: str, rerun: bool = True):

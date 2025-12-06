@@ -1,4 +1,5 @@
 ﻿#include <drogon/drogon.h>
+#include <json/json.h>
 #include "db/Db.h"
 #include <iostream>
 
@@ -17,9 +18,10 @@ int main() {
         [](const drogon::HttpRequestPtr&,
            std::function<void (const drogon::HttpResponsePtr&)>&& cb) {
 
-            auto resp = drogon::HttpResponse::newHttpResponse();
+            Json::Value j;
+            j["status"] = "ok";
+            auto resp = drogon::HttpResponse::newHttpJsonResponse(j);
             resp->setStatusCode(drogon::k200OK);
-            resp->setBody("OK");
             cb(resp);
         },
         {drogon::Get}

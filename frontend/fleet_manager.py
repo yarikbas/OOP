@@ -20,9 +20,26 @@ def safe_cols(df: pd.DataFrame, cols: list[str]) -> list[str]:
 @st.cache_data(ttl=10)  # короткий TTL, щоб не заважати розробці
 def load_all():
     """Збираємо всі дані в одному місці + кеш."""
-    health = api.api_get("/health")
-    if not (health and health.get("status") == "ok"):
-        raise RuntimeError("Backend /health повернув не 'ok'")
+    # /health у різних версіях бекенду міг повертати JSON або plain text.
+    health_ok = False
+
+    try:
+        health = api.api_get("/health")
+        if isinstance(health, dict) and health.get("status") == "ok":
+            health_ok = True
+    except Exception:
+        pass
+
+    if not health_ok:
+        try:
+            health_text = api.api_get("/health", expect_json=False)
+            if isinstance(health_text, str) and health_text.strip().upper() == "OK":
+                health_ok = True
+        except Exception:
+            pass
+
+    if not health_ok:
+        raise RuntimeError("Backend /health недоступний або повертає неочікувану відповідь")
 
     ports_df = api.get_ports()
     ships_df = api.get_ships()
@@ -31,8 +48,6 @@ def load_all():
     types_df = api.get_ship_types()
 
     return ports_df, ships_df, people_df, companies_df, types_df
-
-
 def dataframe_1based(df: pd.DataFrame):
     """Єдиний стиль виводу таблиць."""
     st.dataframe(api.df_1based(df), use_container_width=True)

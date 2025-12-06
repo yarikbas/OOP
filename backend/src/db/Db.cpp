@@ -54,6 +54,13 @@ bool columnExists(sqlite3* db, const char* table, const char* column) {
     return found;
 }
 
+
+void ensureColumn(sqlite3* db, const std::string& table, const std::string& column, const std::string& declaration) {
+    if (!columnExists(db, table, column)) {
+        execOrThrow(db, "ALTER TABLE " + table + " ADD COLUMN " + column + " " + declaration + ";");
+    }
+}
+
 void seedPortsIfEmpty(sqlite3* db) {
     const int cnt = scalarInt(db, "SELECT COUNT(*) FROM ports;");
     if (cnt != 0) return;
@@ -196,11 +203,14 @@ void Db::runMigrations() {
         ");"
     );
 
-    // --- ships.company_id ---
-    if (!columnExists(db_, "ships", "company_id")) {
-        execOrThrow(db_, "ALTER TABLE ships ADD COLUMN company_id INTEGER;");
-    }
+    // --- ships schema upgrades for older app.db versions ---
+    ensureColumn(db_, "ships", "type", "TEXT NOT NULL DEFAULT 'cargo'");
+    ensureColumn(db_, "ships", "country", "TEXT NOT NULL DEFAULT 'Unknown'");
+    ensureColumn(db_, "ships", "port_id", "INTEGER");
+    ensureColumn(db_, "ships", "status", "TEXT NOT NULL DEFAULT 'docked'");
+    ensureColumn(db_, "ships", "company_id", "INTEGER");
     execOrThrow(db_, "CREATE INDEX IF NOT EXISTS idx_ships_company ON ships(company_id);");
+
 
     // --- COMPANY_PORTS ---
     execOrThrow(db_,
