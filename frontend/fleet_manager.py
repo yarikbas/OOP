@@ -31,6 +31,12 @@ except Exception as e:
     st.error(f"Деталі помилки: {e}")
     st.stop()
 
+# ================== ПІДГОТОВКА: АКТИВНІ КОРАБЛІ (НЕ departed) ==================
+if "status" in ships_df.columns:
+    active_ships_df = ships_df[ships_df["status"] != "departed"].copy()
+else:
+    active_ships_df = ships_df.copy()
+
 # ================== ТІТУЛ + ЗАГАЛЬНА СТАТИСТИКА ==================
 st.title("🚢 Fleet Manager Dashboard")
 st.markdown("Огляд стану портів, флоту, екіпажу та компаній.")
@@ -38,7 +44,7 @@ st.markdown("Огляд стану портів, флоту, екіпажу та
 c1, c2, c3, c4, c5 = st.columns(5)
 c1.metric("⚓ Порти", len(ports_df))
 c2.metric("📋 Типи кораблів", len(types_df))
-c3.metric("🚢 Кораблі", len(ships_df))
+c3.metric("🚢 Кораблі (в портах)", len(active_ships_df))
 c4.metric("🧑‍✈️ Персонал", len(people_df))
 c5.metric("🏢 Компанії", len(companies_df))
 
@@ -80,10 +86,15 @@ with col_info:
         f"(id={sel_port_id}, регіон: {sel_port_row['region']})"
     )
 
-    # Кораблі, що зараз закріплені за цим портом
-    ships_in_port = ships_df[ships_df["port_id"] == sel_port_id].copy()
+    # Кораблі, що зараз *фактично в порту* (НЕ departed)
+    if "port_id" in active_ships_df.columns:
+        ships_in_port = active_ships_df[
+            active_ships_df["port_id"] == sel_port_id
+        ].copy()
+    else:
+        ships_in_port = pd.DataFrame()
 
-    # Компанії, які мають кораблі в цьому порту
+    # Компанії, які мають кораблі в цьому порту (серед активних)
     companies_in_port = pd.DataFrame()
     if (
         not ships_in_port.empty
@@ -106,18 +117,20 @@ with col_info:
         ["🚢 Кораблі в цьому порту", "🏢 Компанії в порту", "🌍 Всі кораблі"]
     )
 
-    # --- Таб "Кораблі в цьому порту" ---
+    # --- Таб "Кораблі в цьому порту" (без departed) ---
     with tab_ships:
         if ships_in_port.empty:
-            st.info("У цьому порту зараз немає кораблів.")
+            st.info("У цьому порту зараз немає кораблів (усі, можливо, відпливли).")
         else:
             view_cols = ["id", "name", "type", "country", "status"]
             if "company_id" in ships_in_port.columns:
                 view_cols.append("company_id")
 
+            existing = [c for c in view_cols if c in ships_in_port.columns]
+
             st.dataframe(
                 api.df_1based(
-                    ships_in_port[view_cols]
+                    ships_in_port[existing]
                 ),
                 width="stretch",
             )
@@ -134,7 +147,7 @@ with col_info:
                 width="stretch",
             )
 
-    # --- Таб "Всі кораблі" ---
+    # --- Таб "Всі кораблі" (включно з departed) ---
     with tab_all:
         all_view_cols = ["id", "name", "type", "country", "status"]
         if "port_id" in ships_df.columns:
@@ -142,9 +155,11 @@ with col_info:
         if "company_id" in ships_df.columns:
             all_view_cols.append("company_id")
 
+        existing_all = [c for c in all_view_cols if c in ships_df.columns]
+
         st.dataframe(
             api.df_1based(
-                ships_df[all_view_cols]
+                ships_df[existing_all]
             ),
             width="stretch",
         )
@@ -165,6 +180,6 @@ with col_map:
 
 st.markdown("---")
 st.caption(
-    "Для CRUD-управління портами, кораблями, компаніями та зв'язками "
-    "скористайтесь сторінками в бічному меню (наприклад, '⚙️ Admin')."
+    "Для CRUD-управління портами, кораблями, компаніями, екіпажем та зв'язками "
+    "скористайтесь сторінками в бічному меню."
 )

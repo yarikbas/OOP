@@ -60,8 +60,8 @@ def _after_success(success_msg: str, rerun: bool = True):
     """
     clear_all_caches()
     st.session_state["last_success"] = success_msg
-    # if rerun:
-    #     st.rerun()
+    if rerun:
+        st.rerun()
 
 
 def api_get(path: str):

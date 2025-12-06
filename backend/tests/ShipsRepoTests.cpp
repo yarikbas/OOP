@@ -2,15 +2,6 @@
 #include "db/Db.h"
 #include "repos/ShipsRepo.h"
 
-// Припускаю, що є щось типу:
-// struct Ship {
-//     int id;
-//     std::string name;
-//     std::string type;
-//     std::string country;
-//     int port_id; // якщо немає — прибери з тестів
-// };
-
 class ShipsRepoTest : public ::testing::Test {
 protected:
     void SetUp() override {
