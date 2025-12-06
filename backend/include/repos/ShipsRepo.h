@@ -1,15 +1,20 @@
 ﻿#pragma once
-#include "models/Ship.h"
-#include <vector>
+
+#include <cstdint>
 #include <optional>
+#include <vector>
+
+#include "models/Ship.h"
 
 class ShipsRepo {
 public:
+    using Id = std::int64_t;
+
     std::vector<Ship> all();
-    std::vector<Ship> getByPortId(long long portId);
+    std::vector<Ship> getByPortId(Id portId);
 
     Ship create(const Ship& s);
-    std::optional<Ship> byId(long long id);
+    std::optional<Ship> byId(Id id);
     void update(const Ship& s);
-    void remove(long long id);
+    void remove(Id id);
 };

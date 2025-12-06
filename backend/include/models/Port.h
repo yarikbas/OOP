@@ -1,11 +1,12 @@
 ﻿#pragma once
-#include <string>
+
 #include <cstdint>
+#include <string>
 
 struct Port {
-    long long id{};       // PK
-    std::string name;     // унікальна назва
-    std::string region;   // Europe/Asia/...
-    double lat{};         // широта
-    double lon{};         // довгота
+    std::int64_t id{0};   // PK
+    std::string  name;   // унікальна назва
+    std::string  region; // Europe/Asia/...
+    double       lat{0.0};
+    double       lon{0.0};
 };

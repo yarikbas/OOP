@@ -20,29 +20,72 @@ except Exception as e:
     st.stop()
 
 # Мапи id -> name
-port_map     = api.get_name_map(ports_df) if not ports_df.empty else {}
-company_map  = api.get_name_map(companies_df) if not companies_df.empty else {}
-ship_type_map = api.get_name_map(types_df) if not types_df.empty else {}
+port_map       = api.get_name_map(ports_df) if not ports_df.empty else {}
+company_map    = api.get_name_map(companies_df) if not companies_df.empty else {}
+ship_type_map  = api.get_name_map(types_df) if not types_df.empty else {}
 
-# Статуси кораблів (фіксований список)
+# ================== СТАТУСИ КОРАБЛІВ (узгоджено з бекендом) ==================
 SHIP_STATUS_OPTIONS = [
     ("docked",    "⚓ docked — у порту"),
     ("loading",   "⬆️ loading — завантажується"),
     ("unloading", "⬇️ unloading — розвантажується"),
-    ("at_sea",    "🌊 at_sea — у плаванні"),
+    ("departed",  "🚢 departed — відплив"),
 ]
-
-STATUS_VALUES  = [v for v, _ in SHIP_STATUS_OPTIONS]
-STATUS_LABELS  = {v: label for v, label in SHIP_STATUS_OPTIONS}
+STATUS_VALUES = [v for v, _ in SHIP_STATUS_OPTIONS]
+STATUS_LABELS = {v: label for v, label in SHIP_STATUS_OPTIONS}
 
 def status_format(value: str) -> str:
     return STATUS_LABELS.get(value, value or "невідомо")
+
+def safe_int(x, default=0):
+    try:
+        if pd.isna(x):
+            return default
+        return int(x)
+    except Exception:
+        return default
+
+def ship_label_by_id(sid: int) -> str:
+    if ships_df.empty or "id" not in ships_df.columns:
+        return f"Ship id={sid}"
+    row = ships_df[ships_df["id"] == sid]
+    if row.empty:
+        return f"Ship id={sid}"
+    r = row.iloc[0]
+    name = r.get("name", "")
+    stype = r.get("type", "")
+    return f"{name} (id={sid}, type={stype})"
+
+def port_option_label(pid: int) -> str:
+    return port_map.get(pid, f"port id={pid}")
+
+def company_option_label(cid: int) -> str:
+    if cid == 0:
+        return "— (без компанії)"
+    return company_map.get(cid, f"company id={cid}")
+
+# Підготовка списків id
+port_ids = []
+if not ports_df.empty and "id" in ports_df.columns:
+    port_ids = ports_df["id"].dropna().astype(int).tolist()
+
+company_ids = [0]
+if not companies_df.empty and "id" in companies_df.columns:
+    company_ids += companies_df["id"].dropna().astype(int).tolist()
+
+# Типи кораблів - бажано code
+type_codes = []
+if not types_df.empty:
+    if "code" in types_df.columns:
+        type_codes = types_df["code"].dropna().astype(str).tolist()
+    elif "name" in types_df.columns:
+        type_codes = types_df["name"].dropna().astype(str).tolist()
 
 # ================== ТАБИ ==================
 tab_list, tab_create, tab_update, tab_delete = st.tabs([
     "📋 Список кораблів",
     "➕ Створити корабель",
-    "🛠️ Оновити / Перемістити",
+    "🛠️ Оновити",
     "❌ Видалити корабель",
 ])
 
@@ -53,22 +96,34 @@ with tab_list:
     if ships_df.empty:
         st.info("Поки що немає жодного корабля.")
     else:
+        # Легкі фільтри
+        f1, f2 = st.columns([2, 1])
+        q = f1.text_input("Пошук за назвою", placeholder="введіть частину назви")
+        status_filter = f2.multiselect(
+            "Фільтр статусів",
+            STATUS_VALUES,
+            default=STATUS_VALUES,
+            format_func=status_format,
+        )
+
         view = ships_df.copy()
+
+        if q and "name" in view.columns:
+            view = view[view["name"].astype(str).str.contains(q, case=False, na=False)]
+
+        if "status" in view.columns and status_filter:
+            view = view[view["status"].isin(status_filter)]
 
         # Людські назви порту та компанії
         if "port_id" in view.columns:
-            def port_label(pid):
-                if pd.isna(pid) or pid == 0:
-                    return "🌊 У плаванні"
-                return port_map.get(int(pid), f"port id={pid}")
-            view["port"] = view["port_id"].map(port_label)
+            view["port"] = view["port_id"].map(
+                lambda pid: port_map.get(safe_int(pid), f"port id={pid}")
+            )
 
         if "company_id" in view.columns:
-            def company_label(cid):
-                if pd.isna(cid) or cid == 0:
-                    return "—"
-                return company_map.get(int(cid), f"company id={cid}")
-            view["company"] = view["company_id"].map(company_label)
+            view["company"] = view["company_id"].map(
+                lambda cid: "—" if safe_int(cid) == 0 else company_map.get(safe_int(cid), f"company id={cid}")
+            )
 
         if "status" in view.columns:
             view["status"] = view["status"].map(status_format)
@@ -80,185 +135,135 @@ with tab_list:
         for col in view.columns:
             if col not in cols_order:
                 cols_order.append(col)
-        view = view[cols_order]
 
+        view = view[cols_order]
         st.dataframe(api.df_1based(view), width="stretch")
 
 # ---------- 2. СТВОРИТИ КОРАБЕЛЬ ----------
 with tab_create:
     st.subheader("➕ Створити новий корабель")
 
-    with st.form("create_ship_form"):
-        name = st.text_input("Назва корабля", placeholder="Mriya Sea")
+    if not port_ids:
+        st.warning("Немає портів у БД. Спочатку додайте порти.")
+    else:
+        with st.form("create_ship_form"):
+            name = st.text_input("Назва корабля", placeholder="Mriya Sea")
 
-        # Тип корабля
-        if types_df.empty:
-            ship_type = st.text_input("Тип корабля (текстом)", value="Cargo")
-        else:
-            type_codes = types_df["code"].tolist() if "code" in types_df.columns else types_df["name"].tolist()
-            ship_type = st.selectbox(
-                "Тип корабля",
-                type_codes,
+            # Тип корабля
+            if type_codes:
+                ship_type = st.selectbox("Тип корабля", type_codes, index=0)
+            else:
+                ship_type = st.text_input("Тип корабля (текстом)", value="cargo")
+
+            country = st.text_input("Країна приписки", value="Ukraine")
+
+            # Порт (обов'язково реальний, без 0)
+            selected_port_id = st.selectbox(
+                "Початкове розташування (порт)",
+                port_ids,
+                format_func=port_option_label,
+            )
+
+            # Статус
+            selected_status = st.selectbox(
+                "Початковий статус",
+                STATUS_VALUES,
+                format_func=status_format,
                 index=0,
             )
 
-        country = st.text_input("Країна приписки", value="Ukraine")
+            # Компанія-власник
+            selected_company_id = st.selectbox(
+                "Компанія-власник",
+                company_ids,
+                format_func=company_option_label,
+            )
 
-        # Порт (з опцією “У плаванні”)
-        options_ports = [0]
-        if not ports_df.empty and "id" in ports_df.columns:
-            options_ports += ports_df["id"].astype(int).tolist()
+            submitted = st.form_submit_button("Створити корабель")
 
-        def port_option_label(x: int) -> str:
-            if x == 0:
-                return "🌊 У плаванні (без порту)"
-            return port_map.get(x, f"port id={x}")
+            if submitted:
+                if not name:
+                    st.error("Назва корабля є обов'язковою.")
+                else:
+                    payload = {
+                        "name":       name,
+                        "type":       ship_type,
+                        "country":    country,
+                        "port_id":    int(selected_port_id),
+                        "status":     selected_status,
+                        "company_id": int(selected_company_id),
+                    }
+                    api.api_post(
+                        "/api/ships",
+                        payload,
+                        success_msg=f"Корабель '{name}' створено."
+                    )
 
-        selected_port_id = st.selectbox(
-            "Початкове розташування",
-            options_ports,
-            format_func=port_option_label,
-        )
-
-        # Статус — випадаючий список
-        selected_status = st.selectbox(
-            "Початковий статус",
-            STATUS_VALUES,
-            format_func=status_format,
-            index=0,
-        )
-
-        # Компанія-власник
-        company_ids = [0]
-        if not companies_df.empty and "id" in companies_df.columns:
-            company_ids += companies_df["id"].astype(int).tolist()
-
-        def company_option_label(x: int) -> str:
-            if x == 0:
-                return "— (без компанії)"
-            return company_map.get(x, f"company id={x}")
-
-        selected_company_id = st.selectbox(
-            "Компанія-власник (0 = немає)",
-            company_ids,
-            format_func=company_option_label,
-        )
-
-        submitted = st.form_submit_button("Створити корабель")
-
-        if submitted:
-            if not name:
-                st.error("Назва корабля є обов'язковою.")
-            else:
-                payload = {
-                    "name":       name,
-                    "type":       ship_type,
-                    "country":    country,
-                    "port_id":    int(selected_port_id),   # 0 -> У плаванні
-                    "status":     selected_status,
-                    "company_id": int(selected_company_id),
-                }
-                api.api_post(
-                    "/api/ships",
-                    payload,
-                    success_msg=f"Корабель '{name}' створено."
-                )
-
-# ---------- 3. ОНОВИТИ / ПЕРЕМІСТИТИ ----------
+# ---------- 3. ОНОВИТИ ----------
 with tab_update:
-    st.subheader("🛠️ Оновити дані корабля, перемістити та змінити статус")
+    st.subheader("🛠️ Оновити дані корабля")
 
     if ships_df.empty:
         st.info("Немає кораблів для оновлення.")
     else:
-        ship_ids = ships_df["id"].astype(int).tolist()
-
-        def ship_label(sid: int) -> str:
-            row = ships_df[ships_df["id"] == sid]
-            if row.empty:
-                return f"Ship id={sid}"
-            r = row.iloc[0]
-            return f"{r['name']} (id={sid}, type={r['type']})"
+        ship_ids = ships_df["id"].dropna().astype(int).tolist()
 
         selected_ship_id = st.selectbox(
             "Оберіть корабель",
             ship_ids,
-            format_func=ship_label,
+            format_func=ship_label_by_id,
             key="ship_update_select",
         )
 
         ship_row = ships_df[ships_df["id"] == selected_ship_id].iloc[0]
 
-        st.markdown(f"**Оновлення: {ship_row['name']}**")
-        st.markdown("**1. Переміщення / Статус / Компанія**")
-
         with st.form("update_ship_form"):
-            # === Переміщення у порт (з опцією “У плаванні”) ===
-            options_ports = [0]
-            if not ports_df.empty and "id" in ports_df.columns:
-                options_ports += ports_df["id"].astype(int).tolist()
+            # Порт (без 0)
+            if not port_ids:
+                st.warning("Немає портів у БД. Переміщення неможливе.")
+                new_port_id = safe_int(ship_row.get("port_id", 0))
+            else:
+                cur_port_id = safe_int(ship_row.get("port_id", port_ids[0]))
+                if cur_port_id not in port_ids:
+                    cur_port_id = port_ids[0]
 
-            cur_port_id = 0
-            if "port_id" in ship_row and not pd.isna(ship_row["port_id"]):
-                try:
-                    cur_port_id = int(ship_row["port_id"])
-                except Exception:
-                    cur_port_id = 0
+                port_index = port_ids.index(cur_port_id)
 
-            try:
-                port_index = options_ports.index(cur_port_id)
-            except ValueError:
-                port_index = 0
+                new_port_id = st.selectbox(
+                    "Поточний/новий порт",
+                    port_ids,
+                    index=port_index,
+                    format_func=port_option_label
+                )
 
-            new_port_id = st.selectbox(
-                "Перемістити у порт",
-                options_ports,
-                index=port_index,
-                format_func=lambda x: "🌊 У плаванні (без порту)" if x == 0 else port_map.get(x, f"port id={x}")
-            )
-
-            # === Статус — випадаючий список ===
+            # Статус
             cur_status = str(ship_row.get("status") or "docked")
-            try:
-                status_index = STATUS_VALUES.index(cur_status)
-            except ValueError:
-                status_index = 0
+            status_index = STATUS_VALUES.index(cur_status) if cur_status in STATUS_VALUES else 0
 
             new_status = st.selectbox(
-                "Змінити статус",
+                "Статус",
                 STATUS_VALUES,
                 index=status_index,
                 format_func=status_format,
             )
 
-            # === Компанія-власник ===
-            company_ids = [0]
-            if not companies_df.empty and "id" in companies_df.columns:
-                company_ids += companies_df["id"].astype(int).tolist()
-
-            cur_company_id = 0
-            if "company_id" in ship_row and not pd.isna(ship_row["company_id"]):
-                try:
-                    cur_company_id = int(ship_row["company_id"])
-                except Exception:
-                    cur_company_id = 0
-
-            try:
-                company_index = company_ids.index(cur_company_id)
-            except ValueError:
-                company_index = 0
+            # Компанія
+            cur_company_id = safe_int(ship_row.get("company_id", 0))
+            if cur_company_id not in company_ids:
+                cur_company_id = 0
+            company_index = company_ids.index(cur_company_id)
 
             new_company_id = st.selectbox(
-                "Компанія-власник (0 = немає)",
+                "Компанія-власник",
                 company_ids,
                 index=company_index,
-                format_func=lambda x: "— (без компанії)" if x == 0 else company_map.get(x, f"company id={x}")
+                format_func=company_option_label
             )
 
-            # === Додаткові поля (опційно) ===
-            new_name = st.text_input("Назва корабля", value=ship_row["name"])
-            new_type = st.text_input("Тип корабля", value=ship_row["type"])
-            new_country = st.text_input("Країна приписки", value=ship_row["country"])
+            # Інші поля
+            new_name    = st.text_input("Назва корабля", value=str(ship_row.get("name", "")))
+            new_type    = st.text_input("Тип корабля", value=str(ship_row.get("type", "")))
+            new_country = st.text_input("Країна приписки", value=str(ship_row.get("country", "")))
 
             if st.form_submit_button("Зберегти зміни"):
                 if not new_name:
@@ -268,9 +273,9 @@ with tab_update:
                         "name":       new_name,
                         "type":       new_type,
                         "country":    new_country,
-                        "port_id":    int(new_port_id),     # 0 -> У плаванні (NULL в БД)
-                        "status":     new_status,           # одне з ['docked', 'loading', 'unloading', 'at_sea']
-                        "company_id": int(new_company_id),  # 0 -> без компанії
+                        "port_id":    int(new_port_id),
+                        "status":     new_status,
+                        "company_id": int(new_company_id),
                     }
                     api.api_put(
                         f"/api/ships/{selected_ship_id}",
@@ -285,16 +290,17 @@ with tab_delete:
     if ships_df.empty:
         st.info("Немає кораблів для видалення.")
     else:
-        ship_ids = ships_df["id"].astype(int).tolist()
+        ship_ids = ships_df["id"].dropna().astype(int).tolist()
+
         selected_ship_id = st.selectbox(
             "Оберіть корабель для видалення",
             ship_ids,
-            format_func=lambda sid: ship_label(sid),
+            format_func=ship_label_by_id,
             key="ship_delete_select",
         )
 
         ship_row = ships_df[ships_df["id"] == selected_ship_id].iloc[0]
-        ship_name = ship_row["name"]
+        ship_name = ship_row.get("name", f"id={selected_ship_id}")
 
         st.warning(
             f"Ви дійсно хочете видалити корабель **{ship_name} (id={selected_ship_id})**?",

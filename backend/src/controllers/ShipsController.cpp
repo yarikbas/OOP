@@ -1,47 +1,100 @@
 ﻿#include "controllers/ShipsController.h"
 #include "repos/ShipsRepo.h"
 #include "db/Db.h"
+
+#include <drogon/drogon.h>
 #include <json/json.h>
 #include <sqlite3.h>
+
 #include <algorithm>
-#include <vector>
+#include <array>
+#include <cstdint>
 #include <string>
+#include <string_view>
 
-using namespace drogon;
+namespace {
 
-// ------------ ХЕЛПЕР: JSON-помилка ------------
-static HttpResponsePtr jerr(const std::string& msg, HttpStatusCode code) {
+using drogon::HttpRequestPtr;
+using drogon::HttpResponse;
+using drogon::HttpResponsePtr;
+using drogon::HttpStatusCode;
+
+HttpResponsePtr jsonError(const std::string& msg,
+                          HttpStatusCode code,
+                          const std::string& details = {}) {
     Json::Value e;
     e["error"] = msg;
+    if (!details.empty()) {
+        e["details"] = details; // корисно під час налагодження
+    }
     auto r = HttpResponse::newHttpJsonResponse(e);
     r->setStatusCode(code);
     return r;
 }
 
-// ------------ ХЕЛПЕРИ ДЛЯ СТАТУСІВ КОРАБЛЯ ------------
+Json::Value shipToJson(const Ship& s) {
+    Json::Value j;
+    j["id"]         = Json::Int64(s.id);
+    j["name"]       = s.name;
+    j["type"]       = s.type;
+    j["country"]    = s.country;
+    j["port_id"]    = Json::Int64(s.port_id);
+    j["status"]     = s.status;
+    j["company_id"] = Json::Int64(s.company_id);
+    return j;
+}
 
-static const std::vector<std::string> kShipStatuses = {
-    "docked",      // докований
-    "loading",     // завантажується
-    "unloading",   // розвантажується
-    "departed"     // відплив
+// ------------ СТАТУСИ ------------
+
+constexpr std::array<std::string_view, 4> kShipStatuses = {
+    "docked",
+    "loading",
+    "unloading",
+    "departed"
 };
 
-static bool isValidStatus(const std::string& s) {
-    return std::find(kShipStatuses.begin(), kShipStatuses.end(), s) != kShipStatuses.end();
+bool isValidStatus(std::string_view s) {
+    return std::any_of(kShipStatuses.begin(), kShipStatuses.end(),
+                       [s](std::string_view v) { return v == s; });
 }
 
-// ------------ ХЕЛПЕРИ ДЛЯ ПЕРЕВІРКИ ЕКІПАЖУ ------------
+HttpResponsePtr invalidStatusResponse(std::string_view status) {
+    Json::Value err;
+    err["error"]  = "invalid status";
+    err["status"] = std::string(status);
 
-static bool shipHasAnyActiveCrew(sqlite3* db, std::int64_t shipId) {
+    Json::Value allowed(Json::arrayValue);
+    for (auto st : kShipStatuses) {
+        allowed.append(std::string(st));
+    }
+    err["allowed"] = allowed;
+
+    auto r = HttpResponse::newHttpJsonResponse(err);
+    r->setStatusCode(drogon::k400BadRequest);
+    return r;
+}
+
+// ------------ РАНГИ (UA + EN) ------------
+
+constexpr std::string_view kCaptainUa    = "Капітан";
+constexpr std::string_view kCaptainEn    = "Captain";
+constexpr std::string_view kEngineerUa   = "Інженер";
+constexpr std::string_view kEngineerEn   = "Engineer";
+constexpr std::string_view kResearcherUa = "Дослідник";
+constexpr std::string_view kResearcherEn = "Researcher";
+constexpr std::string_view kSoldierUa    = "Солдат";
+constexpr std::string_view kSoldierEn    = "Soldier";
+
+// ------------ SQL ХЕЛПЕРИ ДЛЯ ЕКІПАЖУ ------------
+
+int countActiveCrew(sqlite3* db, std::int64_t shipId) {
     sqlite3_stmt* st = nullptr;
-    if (sqlite3_prepare_v2(
-            db,
-            "SELECT COUNT(*) FROM crew_assignments "
-            "WHERE ship_id = ? AND end_utc IS NULL;",
-            -1, &st, nullptr) != SQLITE_OK) {
-        if (st) sqlite3_finalize(st);
-        return false;
+    const char* sql =
+        "SELECT COUNT(*) FROM crew_assignments "
+        "WHERE ship_id = ? AND end_utc IS NULL;";
+
+    if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
+        throw std::runtime_error(sqlite3_errmsg(db));
     }
 
     sqlite3_bind_int64(st, 1, shipId);
@@ -50,62 +103,81 @@ static bool shipHasAnyActiveCrew(sqlite3* db, std::int64_t shipId) {
     if (sqlite3_step(st) == SQLITE_ROW) {
         cnt = sqlite3_column_int(st, 0);
     }
+
     sqlite3_finalize(st);
-    return cnt > 0;
+    return cnt;
 }
 
-static bool shipHasActiveCrewWithRank(sqlite3* db,
-                                      std::int64_t shipId,
-                                      const std::string& rank) {
+int countActiveCrewWithRank2(sqlite3* db,
+                             std::int64_t shipId,
+                             std::string_view rank1,
+                             std::string_view rank2) {
     sqlite3_stmt* st = nullptr;
-    if (sqlite3_prepare_v2(
-            db,
-            "SELECT COUNT(*) "
-            "FROM crew_assignments c "
-            "JOIN people p ON p.id = c.person_id "
-            "WHERE c.ship_id = ? "
-            "  AND c.end_utc IS NULL "
-            "  AND p.rank = ?;",
-            -1, &st, nullptr) != SQLITE_OK) {
-        if (st) sqlite3_finalize(st);
-        return false;
+    const char* sql =
+        "SELECT COUNT(*) "
+        "FROM crew_assignments c "
+        "JOIN people p ON p.id = c.person_id "
+        "WHERE c.ship_id = ? "
+        "  AND c.end_utc IS NULL "
+        "  AND (p.rank = ? OR p.rank = ?);";
+
+    if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
+        throw std::runtime_error(sqlite3_errmsg(db));
     }
 
     sqlite3_bind_int64(st, 1, shipId);
-    sqlite3_bind_text(st, 2, rank.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, rank1.data(), static_cast<int>(rank1.size()), SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 3, rank2.data(), static_cast<int>(rank2.size()), SQLITE_TRANSIENT);
 
     int cnt = 0;
     if (sqlite3_step(st) == SQLITE_ROW) {
         cnt = sqlite3_column_int(st, 0);
     }
+
     sqlite3_finalize(st);
-    return cnt > 0;
+    return cnt;
+}
+
+bool shipHasAnyActiveCrew(sqlite3* db, std::int64_t shipId) {
+    return countActiveCrew(db, shipId) > 0;
+}
+
+bool shipHasActiveCaptain(sqlite3* db, std::int64_t shipId) {
+    return countActiveCrewWithRank2(db, shipId, kCaptainUa, kCaptainEn) > 0;
+}
+
+bool shipHasEngineer(sqlite3* db, std::int64_t shipId) {
+    return countActiveCrewWithRank2(db, shipId, kEngineerUa, kEngineerEn) > 0;
+}
+
+bool shipHasResearcher(sqlite3* db, std::int64_t shipId) {
+    return countActiveCrewWithRank2(db, shipId, kResearcherUa, kResearcherEn) > 0;
+}
+
+bool shipHasSoldier(sqlite3* db, std::int64_t shipId) {
+    return countActiveCrewWithRank2(db, shipId, kSoldierUa, kSoldierEn) > 0;
 }
 
 // спеціальні вимоги по професії для типів кораблів
-static bool shipHasRequiredSpecialist(sqlite3* db, const Ship& ship) {
-    // research -> Дослідник
+bool shipHasRequiredSpecialist(sqlite3* db, const Ship& ship) {
     if (ship.type == "research") {
-        return shipHasActiveCrewWithRank(db, ship.id, "Дослідник");
+        return shipHasResearcher(db, ship.id);
     }
-    // military -> Солдат
     if (ship.type == "military") {
-        return shipHasActiveCrewWithRank(db, ship.id, "Солдат");
+        return shipHasSoldier(db, ship.id);
     }
-    // cargo/tanker -> Інженер (як приклад)
     if (ship.type == "cargo" || ship.type == "tanker") {
-        return shipHasActiveCrewWithRank(db, ship.id, "Інженер");
+        return shipHasEngineer(db, ship.id);
     }
-    // для інших типів додаткових вимог нема
     return true;
 }
 
-static bool canShipDepart(sqlite3* db, const Ship& ship, std::string& reasonOut) {
+bool canShipDepart(sqlite3* db, const Ship& ship, std::string& reasonOut) {
     if (!shipHasAnyActiveCrew(db, ship.id)) {
         reasonOut = "Корабель не має жодного активного екіпажу.";
         return false;
     }
-    if (!shipHasActiveCrewWithRank(db, ship.id, "Капітан")) {
+    if (!shipHasActiveCaptain(db, ship.id)) {
         reasonOut = "На кораблі немає активного капітана.";
         return false;
     }
@@ -116,36 +188,41 @@ static bool canShipDepart(sqlite3* db, const Ship& ship, std::string& reasonOut)
     return true;
 }
 
+} // namespace
+
 // ================== LIST ==================
 
 void ShipsController::list(const HttpRequestPtr&,
-                           std::function<void(const HttpResponsePtr&)>&& cb)
-{
-    ShipsRepo repo;
-    auto ships = repo.all();
-    Json::Value arr(Json::arrayValue);
-    for (const auto& s : ships) {
-        Json::Value j;
-        j["id"]         = Json::Int64(s.id);
-        j["name"]       = s.name;
-        j["type"]       = s.type;
-        j["country"]    = s.country;
-        j["port_id"]    = Json::Int64(s.port_id);
-        j["status"]     = s.status;
-        j["company_id"] = Json::Int64(s.company_id);
-        arr.append(j);
+                           std::function<void(const HttpResponsePtr&)>&& cb) {
+    try {
+        ShipsRepo repo;
+        const auto ships = repo.all();
+
+        Json::Value arr(Json::arrayValue);
+        for (const auto& s : ships) {
+            arr.append(shipToJson(s));
+        }
+
+        cb(HttpResponse::newHttpJsonResponse(arr));
+    } catch (const std::exception& ex) {
+        LOG_ERROR << "ShipsController::list failed: " << ex.what();
+        cb(jsonError("list failed", drogon::k500InternalServerError, ex.what()));
     }
-    cb(HttpResponse::newHttpJsonResponse(arr));
 }
 
 // ================== CREATE ==================
 
 void ShipsController::create(const HttpRequestPtr& req,
-                             std::function<void(const HttpResponsePtr&)>&& cb)
-{
-    auto j = req->getJsonObject();
-    if (!j || !(*j).isMember("name")) {
-        cb(jerr("name is required", k400BadRequest));
+                             std::function<void(const HttpResponsePtr&)>&& cb) {
+    const auto j = req->getJsonObject();
+    if (!j) {
+        cb(jsonError("json body required", drogon::k400BadRequest));
+        return;
+    }
+
+    if (!(*j).isMember("name") || !(*j)["name"].isString() ||
+        (*j)["name"].asString().empty()) {
+        cb(jsonError("name is required", drogon::k400BadRequest));
         return;
     }
 
@@ -157,37 +234,22 @@ void ShipsController::create(const HttpRequestPtr& req,
     s.status     = (*j).isMember("status")     ? (*j)["status"].asString()    : "docked";
     s.company_id = (*j).isMember("company_id") ? (*j)["company_id"].asInt64() : 0;
 
-    // валідація статусу
     if (!isValidStatus(s.status)) {
-        Json::Value err;
-        err["error"] = "invalid status";
-        err["status"] = s.status;
-        Json::Value allowed(Json::arrayValue);
-        for (const auto& st : kShipStatuses) allowed.append(st);
-        err["allowed"] = allowed;
-
-        auto r = HttpResponse::newHttpJsonResponse(err);
-        r->setStatusCode(k400BadRequest);
-        cb(r);
+        cb(invalidStatusResponse(s.status));
         return;
     }
 
     try {
         ShipsRepo repo;
-        Ship created = repo.create(s);
-        Json::Value out;
-        out["id"]         = Json::Int64(created.id);
-        out["name"]       = created.name;
-        out["type"]       = created.type;
-        out["country"]    = created.country;
-        out["port_id"]    = Json::Int64(created.port_id);
-        out["status"]     = created.status;
-        out["company_id"] = Json::Int64(created.company_id);
-        cb(HttpResponse::newHttpJsonResponse(out));
+        const Ship created = repo.create(s);
+
+        auto resp = HttpResponse::newHttpJsonResponse(shipToJson(created));
+        resp->setStatusCode(drogon::k201Created);
+        cb(resp);
     } catch (const std::exception& ex) {
-        cb(jerr(std::string("failed to create: ") + ex.what(), k500InternalServerError));
-    } catch (...) {
-        cb(jerr("failed to create", k500InternalServerError));
+        LOG_ERROR << "ShipsController::create failed name='" << s.name
+                  << "': " << ex.what();
+        cb(jsonError("failed to create", drogon::k500InternalServerError, ex.what()));
     }
 }
 
@@ -195,100 +257,85 @@ void ShipsController::create(const HttpRequestPtr& req,
 
 void ShipsController::getOne(const HttpRequestPtr&,
                              std::function<void(const HttpResponsePtr&)>&& cb,
-                             std::int64_t id)
-{
-    ShipsRepo repo;
-    auto s = repo.byId(id);
-    if (!s) {
-        cb(jerr("not found", k404NotFound));
-        return;
+                             std::int64_t id) {
+    try {
+        ShipsRepo repo;
+        const auto s = repo.byId(id);
+        if (!s) {
+            cb(jsonError("not found", drogon::k404NotFound));
+            return;
+        }
+        cb(HttpResponse::newHttpJsonResponse(shipToJson(*s)));
+    } catch (const std::exception& ex) {
+        LOG_ERROR << "ShipsController::getOne failed id=" << id
+                  << ": " << ex.what();
+        cb(jsonError("get failed", drogon::k500InternalServerError, ex.what()));
     }
-
-    Json::Value j;
-    j["id"]         = Json::Int64(s->id);
-    j["name"]       = s->name;
-    j["type"]       = s->type;
-    j["country"]    = s->country;
-    j["port_id"]    = Json::Int64(s->port_id);
-    j["status"]     = s->status;
-    j["company_id"] = Json::Int64(s->company_id);
-    cb(HttpResponse::newHttpJsonResponse(j));
 }
 
 // ================== UPDATE ==================
 
 void ShipsController::updateOne(const HttpRequestPtr& req,
                                 std::function<void(const HttpResponsePtr&)>&& cb,
-                                std::int64_t id)
-{
-    auto j = req->getJsonObject();
+                                std::int64_t id) {
+    const auto j = req->getJsonObject();
     if (!j) {
-        cb(jerr("json body required", k400BadRequest));
+        cb(jsonError("json body required", drogon::k400BadRequest));
         return;
-    }
-
-    ShipsRepo repo;
-    auto curOpt = repo.byId(id);
-    if (!curOpt) {
-        cb(jerr("not found", k404NotFound));
-        return;
-    }
-
-    Ship s = *curOpt;
-
-    // спочатку оновлюємо інші поля
-    if ((*j).isMember("name"))       s.name       = (*j)["name"].asString();
-    if ((*j).isMember("type"))       s.type       = (*j)["type"].asString();
-    if ((*j).isMember("country"))    s.country    = (*j)["country"].asString();
-    if ((*j).isMember("port_id"))    s.port_id    = (*j)["port_id"].asInt64();
-    if ((*j).isMember("company_id")) s.company_id = (*j)["company_id"].asInt64();
-
-    // окремо обробляємо статус
-    if ((*j).isMember("status")) {
-        const std::string newStatus = (*j)["status"].asString();
-
-        if (!isValidStatus(newStatus)) {
-            Json::Value err;
-            err["error"] = "invalid status";
-            err["status"] = newStatus;
-            Json::Value allowed(Json::arrayValue);
-            for (const auto& st : kShipStatuses) allowed.append(st);
-            err["allowed"] = allowed;
-
-            auto r = HttpResponse::newHttpJsonResponse(err);
-            r->setStatusCode(k400BadRequest);
-            cb(r);
-            return;
-        }
-
-        // якщо хочемо перевести в departed — перевіряємо екіпаж / капітана / спеціаліста
-        if (newStatus == "departed") {
-            std::string reason;
-            sqlite3* db = Db::instance().handle();
-            if (!canShipDepart(db, s, reason)) {
-                Json::Value err;
-                err["error"]  = "Ship cannot depart";
-                err["reason"] = reason;
-
-                auto r = HttpResponse::newHttpJsonResponse(err);
-                r->setStatusCode(k409Conflict); // конфлікт стану
-                cb(r);
-                return;
-            }
-        }
-
-        s.status = newStatus;
     }
 
     try {
+        ShipsRepo repo;
+        const auto curOpt = repo.byId(id);
+        if (!curOpt) {
+            cb(jsonError("not found", drogon::k404NotFound));
+            return;
+        }
+
+        Ship s = *curOpt;
+
+        if ((*j).isMember("name"))       s.name       = (*j)["name"].asString();
+        if ((*j).isMember("type"))       s.type       = (*j)["type"].asString();
+        if ((*j).isMember("country"))    s.country    = (*j)["country"].asString();
+        if ((*j).isMember("port_id"))    s.port_id    = (*j)["port_id"].asInt64();
+        if ((*j).isMember("company_id")) s.company_id = (*j)["company_id"].asInt64();
+
+        if ((*j).isMember("status")) {
+            const std::string newStatus = (*j)["status"].asString();
+
+            if (!isValidStatus(newStatus)) {
+                cb(invalidStatusResponse(newStatus));
+                return;
+            }
+
+            if (newStatus == "departed") {
+                std::string reason;
+                sqlite3* db = Db::instance().handle();
+
+                if (!canShipDepart(db, s, reason)) {
+                    Json::Value err;
+                    err["error"]  = "Ship cannot depart";
+                    err["reason"] = reason;
+
+                    auto r = HttpResponse::newHttpJsonResponse(err);
+                    r->setStatusCode(drogon::k409Conflict);
+                    cb(r);
+                    return;
+                }
+            }
+
+            s.status = newStatus;
+        }
+
         repo.update(s);
+
         Json::Value out;
         out["status"] = "updated";
         cb(HttpResponse::newHttpJsonResponse(out));
     } catch (const std::exception& ex) {
-        cb(jerr(std::string("failed to update: ") + ex.what(), k500InternalServerError));
-    } catch (...) {
-        cb(jerr("failed to update", k500InternalServerError));
+        LOG_ERROR << "ShipsController::updateOne failed id=" << id
+                  << ": " << ex.what();
+        cb(jsonError("failed to update", drogon::k500InternalServerError, ex.what()));
     }
 }
 
@@ -296,17 +343,17 @@ void ShipsController::updateOne(const HttpRequestPtr& req,
 
 void ShipsController::deleteOne(const HttpRequestPtr&,
                                 std::function<void(const HttpResponsePtr&)>&& cb,
-                                std::int64_t id)
-{
+                                std::int64_t id) {
     try {
         ShipsRepo repo;
         repo.remove(id);
+
         auto r = HttpResponse::newHttpResponse();
-        r->setStatusCode(k204NoContent);
+        r->setStatusCode(drogon::k204NoContent);
         cb(r);
     } catch (const std::exception& ex) {
-        cb(jerr(std::string("failed to delete: ") + ex.what(), k500InternalServerError));
-    } catch (...) {
-        cb(jerr("failed to delete", k500InternalServerError));
+        LOG_ERROR << "ShipsController::deleteOne failed id=" << id
+                  << ": " << ex.what();
+        cb(jsonError("failed to delete", drogon::k500InternalServerError, ex.what()));
     }
 }

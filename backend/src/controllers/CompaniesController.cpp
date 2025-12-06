@@ -1,35 +1,90 @@
 ﻿#include "controllers/CompaniesController.h"
 #include "repos/CompaniesRepo.h"
-#include <json/json.h>
-#include <drogon/drogon.h>  // для LOG_ERROR
-using namespace drogon;
 
-static HttpResponsePtr jerr(const std::string& msg, HttpStatusCode code) {
+#include <drogon/drogon.h>
+#include <json/json.h>
+
+namespace {
+
+using drogon::HttpRequestPtr;
+using drogon::HttpResponse;
+using drogon::HttpResponsePtr;
+using drogon::HttpStatusCode;
+
+HttpResponsePtr jsonError(const std::string& msg,
+                          HttpStatusCode code,
+                          const std::string& details = {}) {
     Json::Value e;
     e["error"] = msg;
+    if (!details.empty()) {
+        e["details"] = details; // корисно на етапі дебагу
+    }
     auto r = HttpResponse::newHttpJsonResponse(e);
     r->setStatusCode(code);
     return r;
 }
 
-void CompaniesController::list(const HttpRequestPtr&, std::function<void(const HttpResponsePtr&)>&& cb) {
-    CompaniesRepo repo;
-    auto vec = repo.all();
-    Json::Value arr(Json::arrayValue);
-    for (auto &c : vec) {
-        Json::Value j;
-        j["id"]   = Json::Int64(c.id);
-        j["name"] = c.name;
-        arr.append(j);
-    }
-    cb(HttpResponse::newHttpJsonResponse(arr));
+Json::Value companyToJson(const Company& c) {
+    Json::Value j;
+    j["id"]   = Json::Int64(c.id);
+    j["name"] = c.name;
+    return j;
 }
 
-void CompaniesController::create(const HttpRequestPtr &req,
-                                 std::function<void(const HttpResponsePtr &)> &&cb) {
-    auto j = req->getJsonObject();
+Json::Value portToJson(const Port& p) {
+    Json::Value j;
+    j["id"]     = Json::Int64(p.id);
+    j["name"]   = p.name;
+    j["region"] = p.region;
+    j["lat"]    = p.lat;
+    j["lon"]    = p.lon;
+    return j;
+}
+
+Json::Value shipToJson(const Ship& s) {
+    Json::Value j;
+    j["id"]         = Json::Int64(s.id);
+    j["name"]       = s.name;
+    j["type"]       = s.type;
+    j["country"]    = s.country;
+    j["port_id"]    = Json::Int64(s.port_id);
+    j["status"]     = s.status;
+    j["company_id"] = Json::Int64(s.company_id);
+    return j;
+}
+
+HttpStatusCode statusFromSqliteMessage(const std::string& msg) {
+    // мінімальна евристика — достатньо для MVP
+    if (msg.find("UNIQUE") != std::string::npos)   return drogon::k409Conflict;
+    if (msg.find("NOT NULL") != std::string::npos) return drogon::k400BadRequest;
+    if (msg.find("FOREIGN KEY") != std::string::npos) return drogon::k400BadRequest;
+    return drogon::k500InternalServerError;
+}
+
+} // namespace
+
+void CompaniesController::list(const HttpRequestPtr&,
+                               std::function<void(const HttpResponsePtr&)>&& cb) {
+    try {
+        CompaniesRepo repo;
+        const auto vec = repo.all();
+
+        Json::Value arr(Json::arrayValue);
+        for (const auto& c : vec) {
+            arr.append(companyToJson(c));
+        }
+        cb(HttpResponse::newHttpJsonResponse(arr));
+    } catch (const std::exception& e) {
+        LOG_ERROR << "CompaniesController::list failed: " << e.what();
+        cb(jsonError("list failed", drogon::k500InternalServerError, e.what()));
+    }
+}
+
+void CompaniesController::create(const HttpRequestPtr& req,
+                                 std::function<void(const HttpResponsePtr&)>&& cb) {
+    const auto j = req->getJsonObject();
     if (!j || !(*j)["name"].isString() || (*j)["name"].asString().empty()) {
-        cb(jerr("name required", k400BadRequest));
+        cb(jsonError("name required", drogon::k400BadRequest));
         return;
     }
 
@@ -37,171 +92,172 @@ void CompaniesController::create(const HttpRequestPtr &req,
 
     try {
         CompaniesRepo repo;
-        auto c = repo.create(name);
+        const auto c = repo.create(name);
 
-        Json::Value out;
-        out["id"]   = Json::Int64(c.id);
-        out["name"] = c.name;
-
-        auto resp = HttpResponse::newHttpJsonResponse(out);
-        resp->setStatusCode(k201Created);  // 201 Created для успішного створення
+        auto resp = HttpResponse::newHttpJsonResponse(companyToJson(c));
+        resp->setStatusCode(drogon::k201Created);
         cb(resp);
-    }
-    catch (const std::exception &e) {
-        // Логуємо реальну помилку з SQLite/Repo
-        LOG_ERROR << "CompaniesController::create failed for name='" << name
-                  << "': " << e.what();
+    } catch (const std::exception& e) {
+        LOG_ERROR << "CompaniesController::create failed for name='"
+                  << name << "': " << e.what();
 
-        Json::Value err;
-        err["error"]   = "create failed";
-        err["details"] = e.what();  // дуже корисно на етапі налагодження
-
-        auto resp = HttpResponse::newHttpJsonResponse(err);
-
-        // Трошки розумніший вибір статус-коду (НЕ обов'язково, але зручно)
-        std::string msg = e.what();
-        if (msg.find("UNIQUE") != std::string::npos) {
-            // Напр. UNIQUE constraint failed: companies.name
-            resp->setStatusCode(k409Conflict);
-        } else if (msg.find("NOT NULL") != std::string::npos) {
-            // Напр. NOT NULL constraint failed: companies.some_column
-            resp->setStatusCode(k400BadRequest);
-        } else {
-            resp->setStatusCode(k500InternalServerError);
-        }
-
-        cb(resp);
-    }
-    catch (...) {
-        // На всякий випадок: якщо вилетить щось не std::exception
+        const std::string msg = e.what();
+        cb(jsonError("create failed", statusFromSqliteMessage(msg), msg));
+    } catch (...) {
         LOG_ERROR << "CompaniesController::create failed with unknown exception for name='"
                   << name << "'";
-        cb(jerr("create failed", k500InternalServerError));
+        cb(jsonError("create failed", drogon::k500InternalServerError));
     }
 }
 
-void CompaniesController::getOne(const HttpRequestPtr &,
-                                 std::function<void(const HttpResponsePtr &)> &&cb,
+void CompaniesController::getOne(const HttpRequestPtr&,
+                                 std::function<void(const HttpResponsePtr&)>&& cb,
                                  std::int64_t id) {
-    CompaniesRepo repo;
-    auto c = repo.byId(id);
-    if (!c) {
-        cb(jerr("not found", k404NotFound));
-        return;
+    try {
+        CompaniesRepo repo;
+        const auto c = repo.byId(id);
+        if (!c) {
+            cb(jsonError("not found", drogon::k404NotFound));
+            return;
+        }
+        cb(HttpResponse::newHttpJsonResponse(companyToJson(*c)));
+    } catch (const std::exception& e) {
+        LOG_ERROR << "CompaniesController::getOne failed id=" << id << ": " << e.what();
+        cb(jsonError("get failed", drogon::k500InternalServerError, e.what()));
     }
-    Json::Value out;
-    out["id"]   = Json::Int64(c->id);
-    out["name"] = c->name;
-    cb(HttpResponse::newHttpJsonResponse(out));
 }
 
-void CompaniesController::update(const HttpRequestPtr &req,
-                                 std::function<void(const HttpResponsePtr &)> &&cb,
+void CompaniesController::update(const HttpRequestPtr& req,
+                                 std::function<void(const HttpResponsePtr&)>&& cb,
                                  std::int64_t id) {
-    auto j = req->getJsonObject();
+    const auto j = req->getJsonObject();
     if (!j || !(*j)["name"].isString() || (*j)["name"].asString().empty()) {
-        cb(jerr("name required", k400BadRequest));
+        cb(jsonError("name required", drogon::k400BadRequest));
         return;
     }
 
-    CompaniesRepo repo;
-    bool ok = repo.update(id, (*j)["name"].asString());
-    if (!ok) {
-        cb(jerr("not found or unchanged", k404NotFound));
-        return;
-    }
+    const auto name = (*j)["name"].asString();
 
-    Json::Value out;
-    out["status"] = "updated";
-    cb(HttpResponse::newHttpJsonResponse(out));
+    try {
+        CompaniesRepo repo;
+        const bool ok = repo.update(id, name);
+        if (!ok) {
+            // у тебе repo повертає false і коли не знайдено, і коли нічого не змінилось
+            cb(jsonError("not found or unchanged", drogon::k404NotFound));
+            return;
+        }
+
+        Json::Value out;
+        out["status"] = "updated";
+        cb(HttpResponse::newHttpJsonResponse(out));
+    } catch (const std::exception& e) {
+        LOG_ERROR << "CompaniesController::update failed id=" << id << ": " << e.what();
+        cb(jsonError("update failed", statusFromSqliteMessage(e.what()), e.what()));
+    }
 }
 
-void CompaniesController::remove(const HttpRequestPtr &,
-                                 std::function<void(const HttpResponsePtr &)> &&cb,
+void CompaniesController::remove(const HttpRequestPtr&,
+                                 std::function<void(const HttpResponsePtr&)>&& cb,
                                  std::int64_t id) {
-    CompaniesRepo repo;
-    bool ok = repo.remove(id);
-    if (!ok) {
-        cb(jerr("not found", k404NotFound));
-        return;
+    try {
+        CompaniesRepo repo;
+        const bool ok = repo.remove(id);
+        if (!ok) {
+            cb(jsonError("not found", drogon::k404NotFound));
+            return;
+        }
+        auto r = HttpResponse::newHttpResponse();
+        r->setStatusCode(drogon::k204NoContent);
+        cb(r);
+    } catch (const std::exception& e) {
+        LOG_ERROR << "CompaniesController::remove failed id=" << id << ": " << e.what();
+        cb(jsonError("remove failed", drogon::k500InternalServerError, e.what()));
     }
-    auto r = HttpResponse::newHttpResponse();
-    r->setStatusCode(k204NoContent);
-    cb(r);
 }
 
-void CompaniesController::listPorts(const HttpRequestPtr &,
-                                    std::function<void(const HttpResponsePtr &)> &&cb,
+void CompaniesController::listPorts(const HttpRequestPtr&,
+                                    std::function<void(const HttpResponsePtr&)>&& cb,
                                     std::int64_t id) {
-    CompaniesRepo repo;
-    auto vec = repo.ports(id);
-    Json::Value arr(Json::arrayValue);
-    for (auto &p : vec) {
-        Json::Value j;
-        j["id"]     = Json::Int64(p.id);
-        j["name"]   = p.name;
-        j["region"] = p.region;
-        j["lat"]    = p.lat;
-        j["lon"]    = p.lon;
-        arr.append(j);
+    try {
+        CompaniesRepo repo;
+        const auto vec = repo.ports(id);
+
+        Json::Value arr(Json::arrayValue);
+        for (const auto& p : vec) {
+            arr.append(portToJson(p));
+        }
+        cb(HttpResponse::newHttpJsonResponse(arr));
+    } catch (const std::exception& e) {
+        LOG_ERROR << "CompaniesController::listPorts failed id=" << id << ": " << e.what();
+        cb(jsonError("list ports failed", drogon::k500InternalServerError, e.what()));
     }
-    cb(HttpResponse::newHttpJsonResponse(arr));
 }
 
-void CompaniesController::addPort(const HttpRequestPtr &req,
-                                  std::function<void(const HttpResponsePtr &)> &&cb,
+void CompaniesController::addPort(const HttpRequestPtr& req,
+                                  std::function<void(const HttpResponsePtr&)>&& cb,
                                   std::int64_t id) {
-    auto j = req->getJsonObject();
+    const auto j = req->getJsonObject();
     if (!j || !(*j)["port_id"].isIntegral()) {
-        cb(jerr("port_id required", k400BadRequest));
+        cb(jsonError("port_id required", drogon::k400BadRequest));
         return;
     }
 
-    bool isHq = (*j).isMember("is_hq") ? (*j)["is_hq"].asBool() : false;
+    const auto portId = (*j)["port_id"].asInt64();
+    const bool isHq = (*j).isMember("is_hq") ? (*j)["is_hq"].asBool() : false;
 
-    CompaniesRepo repo;
-    bool ok = repo.addPort(id, (*j)["port_id"].asInt64(), isHq);
-    if (!ok) {
-        cb(jerr("already exists or invalid", k400BadRequest));
-        return;
+    try {
+        CompaniesRepo repo;
+        const bool ok = repo.addPort(id, portId, isHq);
+        if (!ok) {
+            cb(jsonError("already exists or invalid", drogon::k400BadRequest));
+            return;
+        }
+
+        Json::Value out;
+        out["status"] = "added";
+        cb(HttpResponse::newHttpJsonResponse(out));
+    } catch (const std::exception& e) {
+        LOG_ERROR << "CompaniesController::addPort failed companyId=" << id
+                  << " portId=" << portId << ": " << e.what();
+        cb(jsonError("add port failed", statusFromSqliteMessage(e.what()), e.what()));
     }
-
-    Json::Value out;
-    out["status"] = "added";
-    cb(HttpResponse::newHttpJsonResponse(out));
 }
 
-void CompaniesController::delPort(const HttpRequestPtr &,
-                                  std::function<void(const HttpResponsePtr &)> &&cb,
+void CompaniesController::delPort(const HttpRequestPtr&,
+                                  std::function<void(const HttpResponsePtr&)>&& cb,
                                   std::int64_t id,
                                   std::int64_t portId) {
-    CompaniesRepo repo;
-    bool ok = repo.removePort(id, portId);
-    if (!ok) {
-        cb(jerr("not found", k404NotFound));
-        return;
+    try {
+        CompaniesRepo repo;
+        const bool ok = repo.removePort(id, portId);
+        if (!ok) {
+            cb(jsonError("not found", drogon::k404NotFound));
+            return;
+        }
+        auto r = HttpResponse::newHttpResponse();
+        r->setStatusCode(drogon::k204NoContent);
+        cb(r);
+    } catch (const std::exception& e) {
+        LOG_ERROR << "CompaniesController::delPort failed companyId=" << id
+                  << " portId=" << portId << ": " << e.what();
+        cb(jsonError("delete port failed", drogon::k500InternalServerError, e.what()));
     }
-    auto r = HttpResponse::newHttpResponse();
-    r->setStatusCode(k204NoContent);
-    cb(r);
 }
 
-void CompaniesController::listShips(const HttpRequestPtr &,
-                                    std::function<void(const HttpResponsePtr &)> &&cb,
+void CompaniesController::listShips(const HttpRequestPtr&,
+                                    std::function<void(const HttpResponsePtr&)>&& cb,
                                     std::int64_t id) {
-    CompaniesRepo repo;
-    auto vec = repo.ships(id);
-    Json::Value arr(Json::arrayValue);
-    for (auto &s : vec) {
-        Json::Value j;
-        j["id"]         = Json::Int64(s.id);
-        j["name"]       = s.name;
-        j["type"]       = s.type;
-        j["country"]    = s.country;
-        j["port_id"]    = Json::Int64(s.port_id);
-        j["status"]     = s.status;
-        j["company_id"] = Json::Int64(s.company_id);
-        arr.append(j);
+    try {
+        CompaniesRepo repo;
+        const auto vec = repo.ships(id);
+
+        Json::Value arr(Json::arrayValue);
+        for (const auto& s : vec) {
+            arr.append(shipToJson(s));
+        }
+        cb(HttpResponse::newHttpJsonResponse(arr));
+    } catch (const std::exception& e) {
+        LOG_ERROR << "CompaniesController::listShips failed id=" << id << ": " << e.what();
+        cb(jsonError("list ships failed", drogon::k500InternalServerError, e.what()));
     }
-    cb(HttpResponse::newHttpJsonResponse(arr));
 }

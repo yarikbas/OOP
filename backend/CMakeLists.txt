@@ -4,10 +4,10 @@ project(oop_backend LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# ---- deps for core/server ----
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
 find_package(Drogon CONFIG REQUIRED)
-find_package(nlohmann_json CONFIG REQUIRED)
-find_package(GTest CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED) # прибери, якщо реально не використовуєш
 
 # ---- core ----
 add_library(oop_core STATIC
@@ -21,9 +21,10 @@ add_library(oop_core STATIC
 )
 
 target_include_directories(oop_core PUBLIC include)
+
 target_link_libraries(oop_core PUBLIC
-    nlohmann_json::nlohmann_json
     unofficial::sqlite3::sqlite3
+    nlohmann_json::nlohmann_json
 )
 
 # ---- server ----
@@ -38,25 +39,34 @@ add_executable(oop_backend
 )
 
 target_include_directories(oop_backend PRIVATE include)
-target_link_libraries(oop_backend PRIVATE Drogon::Drogon oop_core)
 
-add_executable(oop_tests
-    tests/ShipsRepoTests.cpp
-    tests/PeopleRepoTests.cpp
-    tests/ShipTypesRepoTests.cpp
-    # тимчасово вимикаємо, бо код змінився:
-    # tests/PortsRepoTests.cpp
-    # tests/CompaniesRepoTests.cpp
-    tests/CrewRepoTests.cpp
-)
-
-
-target_include_directories(oop_tests PRIVATE include)
-target_link_libraries(oop_tests PRIVATE
+target_link_libraries(oop_backend PRIVATE
+    Drogon::Drogon
     oop_core
-    GTest::gtest
-    GTest::gtest_main
 )
 
-enable_testing()
-add_test(NAME AllRepoTests COMMAND oop_tests)
+# ---- tests ----
+include(CTest)
+
+if(BUILD_TESTING)
+    find_package(GTest CONFIG REQUIRED)
+
+    add_executable(oop_tests
+        tests/PortsRepoTests.cpp
+        tests/ShipsRepoTests.cpp
+        tests/PeopleRepoTests.cpp
+        tests/CompaniesRepoTests.cpp
+        tests/ShipTypesRepoTests.cpp
+        tests/CrewRepoTests.cpp
+    )
+
+    target_include_directories(oop_tests PRIVATE include)
+
+    target_link_libraries(oop_tests PRIVATE
+        oop_core
+        GTest::gtest
+        GTest::gtest_main
+    )
+
+    add_test(NAME AllRepoTests COMMAND oop_tests)
+endif()

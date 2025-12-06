@@ -7,7 +7,7 @@
     "log_level": "TRACE"
   },
   "listeners": [
-    { "address": "127.0.0.1", "port": 8081 }
+    { "address": "127.0.0.1", "port": 8082 }
   ],
   "ssl": { "use_ssl": false }
 }

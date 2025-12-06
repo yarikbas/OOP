@@ -1,171 +1,109 @@
 #include <gtest/gtest.h>
 #include "db/Db.h"
-#include "repos/ShipTypesRepo.h"
+#include "repos/CrewRepo.h"
+#include "repos/PeopleRepo.h"
+#include "repos/ShipsRepo.h"
+#include "repos/PortsRepo.h"
+#include "tests/TestHelpers.h"
 
-// Припускаю, що є щось типу:
-// struct ShipType {
-//     int id;
-//     std::string code;
-//     std::string name;
-//     std::string description;
-// };
-
-class ShipTypesRepoTest : public ::testing::Test {
+class CrewRepoTest : public ::testing::Test {
 protected:
-    void SetUp() override {
-        Db::instance().reset();
-    }
+    void SetUp() override { Db::instance().reset(); }
 };
 
-// 1. Базовий повний CRUD для одного типу
-TEST_F(ShipTypesRepoTest, CreateGetUpdateDeleteSingleType) {
-    ShipTypesRepo repo;
+TEST_F(CrewRepoTest, AssignAndListCurrentCrew) {
+    auto port = ensurePort("CrewPort", "R", 1, 1);
 
-    ShipType t;
-    t.code = "icebreaker";
-    t.name = "Icebreaker";
-    t.description = "Arctic ops";
+    PeopleRepo people;
+    ShipsRepo ships;
+    CrewRepo crew;
 
-    auto created = repo.create(t);
-    ASSERT_GT(created.id, 0);
-    EXPECT_EQ(created.code, "icebreaker");
-    EXPECT_EQ(created.name, "Icebreaker");
-    EXPECT_EQ(created.description, "Arctic ops");
+    Person p; p.full_name = "Alice"; p.rank = "Engineer"; p.active = 1;
+    auto createdP = people.create(p);
 
-    auto got = repo.byId(created.id);
-    ASSERT_TRUE(got.has_value());
-    EXPECT_EQ(got->id, created.id);
-    EXPECT_EQ(got->code, "icebreaker");
-    EXPECT_EQ(got->name, "Icebreaker");
-    EXPECT_EQ(got->description, "Arctic ops");
+    Ship s; 
+    s.name="TestShip"; s.type="research"; s.country="UA";
+    s.port_id=port.id; s.status="docked"; s.company_id=0;
+    auto createdS = ships.create(s);
 
-    created.name = "Ice Breaker";
-    created.description = "Updated description";
-    repo.update(created);
+    auto a = crew.assign(createdP.id, createdS.id, "2025-01-01T00:00:00Z");
+    ASSERT_TRUE(a.has_value());
 
-    auto upd = repo.byId(created.id);
-    ASSERT_TRUE(upd.has_value());
-    EXPECT_EQ(upd->name, "Ice Breaker");
-    EXPECT_EQ(upd->description, "Updated description");
-
-    repo.remove(created.id);
-    auto gone = repo.byId(created.id);
-    EXPECT_FALSE(gone.has_value());
+    auto list = crew.currentCrewByShip(createdS.id);
+    ASSERT_EQ(list.size(), 1u);
+    EXPECT_EQ(list[0].person_id, createdP.id);
 }
 
-// 2. byId для неіснуючого id
-TEST_F(ShipTypesRepoTest, GetNonExistingTypeReturnsEmptyOptional) {
-    ShipTypesRepo repo;
+TEST_F(CrewRepoTest, PreventSecondActiveAssignmentForPerson) {
+    auto port = ensurePort("CrewPort2", "R", 1, 1);
 
-    auto got = repo.byId(123456);
-    EXPECT_FALSE(got.has_value());
+    PeopleRepo people;
+    ShipsRepo ships;
+    CrewRepo crew;
+
+    Person p; p.full_name = "Bob"; p.rank = "Engineer"; p.active = 1;
+    auto createdP = people.create(p);
+
+    Ship s1; s1.name="S1"; s1.type="cargo"; s1.country="UA";
+    s1.port_id=port.id; s1.status="docked"; s1.company_id=0;
+
+    Ship s2; s2.name="S2"; s2.type="cargo"; s2.country="UA";
+    s2.port_id=port.id; s2.status="docked"; s2.company_id=0;
+
+    auto c1 = ships.create(s1);
+    auto c2 = ships.create(s2);
+
+    ASSERT_TRUE(crew.assign(createdP.id, c1.id, "2025-01-01T00:00:00Z").has_value());
+    ASSERT_FALSE(crew.assign(createdP.id, c2.id, "2025-01-02T00:00:00Z").has_value());
 }
 
-// 3. Delete неіснуючого типу не кидає
-TEST_F(ShipTypesRepoTest, DeleteNonExistingTypeDoesNotThrow) {
-    ShipTypesRepo repo;
+TEST_F(CrewRepoTest, PreventSecondActiveAssignmentForShip) {
+    auto port = ensurePort("CrewPort3", "R", 1, 1);
 
-    EXPECT_NO_THROW(repo.remove(999999));
+    PeopleRepo people;
+    ShipsRepo ships;
+    CrewRepo crew;
+
+    auto p1 = ensurePerson("P1", "Engineer", 1);
+    auto p2 = ensurePerson("P2", "Engineer", 1);
+
+    Ship s; 
+    s.name="OneShip"; s.type="cargo"; s.country="UA";
+    s.port_id=port.id; s.status="docked"; s.company_id=0;
+
+    auto ship = ships.create(s);
+
+    ASSERT_TRUE(crew.assign(p1.id, ship.id, "2025-01-01T00:00:00Z").has_value());
+    // друге активне призначення на той самий ship має бути заборонене
+    ASSERT_FALSE(crew.assign(p2.id, ship.id, "2025-01-02T00:00:00Z").has_value());
 }
 
-// 4. all() на порожній БД → порожній вектор
-//    Якщо в тебе немає методу all(), просто видали цей тест.
-TEST_F(ShipTypesRepoTest, AllOnEmptyDbReturnsEmptyVector) {
-    ShipTypesRepo repo;
+TEST_F(CrewRepoTest, EndAssignmentAllowsReassign) {
+    auto port = ensurePort("CrewPort4", "R", 1, 1);
 
-    auto allTypes = repo.all();
-    EXPECT_TRUE(allTypes.empty());
-}
+    PeopleRepo people;
+    ShipsRepo ships;
+    CrewRepo crew;
 
-// 5. all() повертає всі додані типи
-TEST_F(ShipTypesRepoTest, AllReturnsAllInsertedTypes) {
-    ShipTypesRepo repo;
+    auto p = ensurePerson("Reassign Person", "Engineer", 1);
 
-    ShipType t1; t1.code = "cargo";     t1.name = "Cargo";     t1.description = "Cargo ship";
-    ShipType t2; t2.code = "tanker";    t2.name = "Tanker";    t2.description = "Oil tanker";
-    ShipType t3; t3.code = "passenger"; t3.name = "Passenger"; t3.description = "Passenger liner";
+    Ship s1; s1.name="S1"; s1.type="cargo"; s1.country="UA";
+    s1.port_id=port.id; s1.status="docked"; s1.company_id=0;
 
-    auto c1 = repo.create(t1);
-    auto c2 = repo.create(t2);
-    auto c3 = repo.create(t3);
+    Ship s2; s2.name="S2"; s2.type="cargo"; s2.country="UA";
+    s2.port_id=port.id; s2.status="docked"; s2.company_id=0;
 
-    auto allTypes = repo.all();
-    ASSERT_EQ(allTypes.size(), 3u);
+    auto ship1 = ships.create(s1);
+    auto ship2 = ships.create(s2);
 
-    bool hasCargo = false, hasTanker = false, hasPassenger = false;
-    for (const auto &st : allTypes) {
-        if (st.id == c1.id && st.code == "cargo")     hasCargo = true;
-        if (st.id == c2.id && st.code == "tanker")    hasTanker = true;
-        if (st.id == c3.id && st.code == "passenger") hasPassenger = true;
-    }
+    auto a1 = crew.assign(p.id, ship1.id, "2025-01-01T00:00:00Z");
+    ASSERT_TRUE(a1.has_value());
 
-    EXPECT_TRUE(hasCargo);
-    EXPECT_TRUE(hasTanker);
-    EXPECT_TRUE(hasPassenger);
-}
+    // завершуємо
+    auto ended = crew.end(p.id, "2025-01-10T00:00:00Z");
+    ASSERT_TRUE(ended.has_value());
 
-// 6. Перевірка, що code / name / description зберігаються коректно
-TEST_F(ShipTypesRepoTest, FieldsPersistCorrectly) {
-    ShipTypesRepo repo;
-
-    ShipType t;
-    t.code = "ferry";
-    t.name = "Ferry";
-    t.description = "Short-distance passenger transport";
-
-    auto created = repo.create(t);
-    auto got = repo.byId(created.id);
-
-    ASSERT_TRUE(got.has_value());
-    EXPECT_EQ(got->code, "ferry");
-    EXPECT_EQ(got->name, "Ferry");
-    EXPECT_EQ(got->description, "Short-distance passenger transport");
-}
-
-// 7. Update неіснуючого типу не кидає (якщо така поведінка норм для твого репо)
-TEST_F(ShipTypesRepoTest, UpdateNonExistingTypeDoesNotThrow) {
-    ShipTypesRepo repo;
-
-    ShipType ghost;
-    ghost.id = 777777;
-    ghost.code = "ghost";
-    ghost.name = "Ghost Type";
-    ghost.description = "Should not exist";
-
-    EXPECT_NO_THROW(repo.update(ghost));
-}
-
-// 8. Id створених типів зростають
-TEST_F(ShipTypesRepoTest, CreatedTypesHaveIncrementingIds) {
-    ShipTypesRepo repo;
-
-    ShipType t1; t1.code = "c1"; t1.name = "Type 1"; t1.description = "First";
-    ShipType t2; t2.code = "c2"; t2.name = "Type 2"; t2.description = "Second";
-    ShipType t3; t3.code = "c3"; t3.name = "Type 3"; t3.description = "Third";
-
-    auto c1 = repo.create(t1);
-    auto c2 = repo.create(t2);
-    auto c3 = repo.create(t3);
-
-    EXPECT_LT(c1.id, c2.id);
-    EXPECT_LT(c2.id, c3.id);
-}
-
-// 9. (Опціонально) Пошук за code, якщо є метод byCode / findByCode
-//    Якщо такого методу немає — просто видали тест.
-TEST_F(ShipTypesRepoTest, FindByCodeReturnsCorrectType) {
-    ShipTypesRepo repo;
-
-    ShipType t;
-    t.code = "research";
-    t.name = "Research Vessel";
-    t.description = "Science stuff";
-
-    auto created = repo.create(t);
-
-    // Якщо в тебе метод називається інакше (findByCode / by_code / getByCode) — заміни тут.
-    auto found = repo.byCode("research");
-    ASSERT_TRUE(found.has_value());
-    EXPECT_EQ(found->id, created.id);
-    EXPECT_EQ(found->name, "Research Vessel");
+    // тепер можна призначити на інший корабель
+    auto a2 = crew.assign(p.id, ship2.id, "2025-01-11T00:00:00Z");
+    ASSERT_TRUE(a2.has_value());
 }

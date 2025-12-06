@@ -1,13 +1,45 @@
 ﻿// ShipTypesRepoTest.cpp
 #include <gtest/gtest.h>
+
 #include "db/Db.h"
 #include "repos/ShipTypesRepo.h"
+
+#include <sqlite3.h>
+#include <string>
+#include <stdexcept>
+
+namespace {
+
+static void execSql(sqlite3* db, const char* sql) {
+    char* err = nullptr;
+    const int rc = sqlite3_exec(db, sql, nullptr, nullptr, &err);
+    if (rc != SQLITE_OK) {
+        std::string msg = err ? err : "unknown sqlite error";
+        if (err) sqlite3_free(err);
+        throw std::runtime_error(msg);
+    }
+}
+
+// Ізоляція саме для ship_types
+static void resetShipTypesOnly() {
+    sqlite3* db = Db::instance().handle();
+
+    // ship_types не має FK-залежностей у твоїй схемі (ships.type — TEXT),
+    // тому безпечно чистити.
+    execSql(db, "DELETE FROM ship_types;");
+    execSql(db, "DELETE FROM sqlite_sequence WHERE name IN ('ship_types');");
+}
+
+} // namespace
 
 class ShipTypesRepoTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        // Повна очистка БД перед кожним тестом
+        // чистимо ships/crew як мінімум
         Db::instance().reset();
+
+        // і головне — чистимо ship_types, щоб сидінг не заважав тестам
+        resetShipTypesOnly();
     }
 };
 
@@ -38,7 +70,7 @@ TEST_F(ShipTypesRepoTest, CreateGetUpdateDelete) {
     // UPDATE
     created.name = "Ice Breaker";
     created.description = "Arctic operations";
-    repo.update(created);
+    EXPECT_NO_THROW(repo.update(created));
 
     auto upd = repo.byId(created.id);
     ASSERT_TRUE(upd.has_value());
@@ -46,40 +78,41 @@ TEST_F(ShipTypesRepoTest, CreateGetUpdateDelete) {
     EXPECT_EQ(upd->description, "Arctic operations");
 
     // DELETE
-    repo.remove(created.id);
+    EXPECT_NO_THROW(repo.remove(created.id));
+
     auto gone = repo.byId(created.id);
     EXPECT_FALSE(gone.has_value());
 }
 
-// Пошук за унікальним code (якщо є метод byCode)
+// Пошук за унікальним code
 TEST_F(ShipTypesRepoTest, FindByCode) {
     ShipTypesRepo repo;
 
     ShipType t;
-    t.code = "tanker";
+    t.code = "tanker_test";
     t.name = "Tanker";
     t.description = "Oil carrier";
 
     auto created = repo.create(t);
 
-    auto got = repo.byCode("tanker");
+    auto got = repo.byCode("tanker_test");
     ASSERT_TRUE(got.has_value());
     EXPECT_EQ(got->id, created.id);
-    EXPECT_EQ(got->code, "tanker");
+    EXPECT_EQ(got->code, "tanker_test");
     EXPECT_EQ(got->name, "Tanker");
 }
 
-// Список усіх типів (якщо є метод all)
+// Список усіх типів
 TEST_F(ShipTypesRepoTest, ListAllContainsInsertedTypes) {
     ShipTypesRepo repo;
 
     ShipType a;
-    a.code = "cargo";
+    a.code = "cargo_test";
     a.name = "Cargo";
     a.description = "General cargo";
 
     ShipType b;
-    b.code = "ferry";
+    b.code = "ferry_test";
     b.name = "Ferry";
     b.description = "Passengers";
 
@@ -87,27 +120,21 @@ TEST_F(ShipTypesRepoTest, ListAllContainsInsertedTypes) {
     auto cb = repo.create(b);
 
     auto list = repo.all();
-    // Має бути хоча б 2 записи
-    ASSERT_GE(list.size(), 2u);
+    ASSERT_EQ(list.size(), 2u);
 
     bool foundCargo = false;
     bool foundFerry = false;
 
     for (const auto &t : list) {
-        if (t.id == ca.id && t.code == "cargo") {
-            foundCargo = true;
-        }
-        if (t.id == cb.id && t.code == "ferry") {
-            foundFerry = true;
-        }
+        if (t.id == ca.id && t.code == "cargo_test") foundCargo = true;
+        if (t.id == cb.id && t.code == "ferry_test") foundFerry = true;
     }
 
     EXPECT_TRUE(foundCargo);
     EXPECT_TRUE(foundFerry);
 }
 
-// Заборона дублювати code (якщо в БД стоїть UNIQUE)
-// і create() при цьому кидає std::runtime_error
+// Заборона дублювати code (UNIQUE)
 TEST_F(ShipTypesRepoTest, DuplicateCodeShouldFail) {
     ShipTypesRepo repo;
 
@@ -122,8 +149,5 @@ TEST_F(ShipTypesRepoTest, DuplicateCodeShouldFail) {
     t2.description = "Second pilot boat";
 
     repo.create(t1);
-
-    // Якщо ти реалізуєш інший механізм помилки –
-    // поміняй тип exception тут.
     EXPECT_THROW(repo.create(t2), std::runtime_error);
 }

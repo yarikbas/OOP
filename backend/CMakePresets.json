@@ -1,32 +1,47 @@
 {
   "version": 6,
   "cmakeMinimumRequired": { "major": 3, "minor": 21 },
+
   "configurePresets": [
     {
-      "name": "x64-Release",
-      "displayName": "VS2022 x64 (Release)",
+      "name": "vs2022-x64",
+      "displayName": "VS2022 x64",
       "generator": "Visual Studio 17 2022",
       "architecture": { "value": "x64" },
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
-      }
-    },
-    {
-      "name": "x64-Debug",
-      "displayName": "VS2022 x64 (Debug)",
-      "generator": "Visual Studio 17 2022",
-      "architecture": { "value": "x64" },
-      "binaryDir": "${sourceDir}/build/${presetName}",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "BUILD_TESTING": "ON",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
     }
   ],
+
   "buildPresets": [
-    { "name": "build-release", "configurePreset": "x64-Release" },
-    { "name": "build-debug",   "configurePreset": "x64-Debug" }
+    {
+      "name": "build-release",
+      "configurePreset": "vs2022-x64",
+      "configuration": "Release"
+    },
+    {
+      "name": "build-debug",
+      "configurePreset": "vs2022-x64",
+      "configuration": "Debug"
+    }
+  ],
+
+  "testPresets": [
+    {
+      "name": "test-debug",
+      "configurePreset": "vs2022-x64",
+      "configuration": "Debug",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "test-release",
+      "configurePreset": "vs2022-x64",
+      "configuration": "Release",
+      "output": { "outputOnFailure": true }
+    }
   ]
 }

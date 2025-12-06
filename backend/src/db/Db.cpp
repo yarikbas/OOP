@@ -1,20 +1,108 @@
-﻿#include "db/Db.h"
+﻿// src/db/Db.cpp
+#include "db/Db.h"
+
+#include <sqlite3.h>
 #include <filesystem>
 #include <stdexcept>
 #include <string>
 #include <iostream>
 
-static void execOrThrow(sqlite3* db, const char* sql) {
+namespace {
+
+void execOrThrow(sqlite3* db, const char* sql) {
     char* err = nullptr;
     const int rc = sqlite3_exec(db, sql, nullptr, nullptr, &err);
     if (rc != SQLITE_OK) {
-        std::string msg = err ? err : "unknown";
+        std::string msg = err ? err : sqlite3_errmsg(db);
         if (err) sqlite3_free(err);
         throw std::runtime_error("sqlite exec failed: " + msg);
     }
 }
 
-Db& Db::instance() {
+int scalarInt(sqlite3* db, const char* sql) {
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
+        throw std::runtime_error(sqlite3_errmsg(db));
+    }
+
+    int value = 0;
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        value = sqlite3_column_int(st, 0);
+    }
+    sqlite3_finalize(st);
+    return value;
+}
+
+bool columnExists(sqlite3* db, const char* table, const char* column) {
+    sqlite3_stmt* st = nullptr;
+    const std::string sql = std::string("PRAGMA table_info(") + table + ");";
+
+    if (sqlite3_prepare_v2(db, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) {
+        throw std::runtime_error(sqlite3_errmsg(db));
+    }
+
+    bool found = false;
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        const unsigned char* name = sqlite3_column_text(st, 1); // column name
+        if (name && std::string(reinterpret_cast<const char*>(name)) == column) {
+            found = true;
+            break;
+        }
+    }
+
+    sqlite3_finalize(st);
+    return found;
+}
+
+void seedPortsIfEmpty(sqlite3* db) {
+    const int cnt = scalarInt(db, "SELECT COUNT(*) FROM ports;");
+    if (cnt != 0) return;
+
+    execOrThrow(db, "BEGIN;");
+    try {
+        execOrThrow(db,
+            "INSERT INTO ports (name, region, lat, lon) VALUES "
+            "('Rotterdam','Europe',51.9,4.4),"
+            "('Hamburg','Europe',53.5,9.9),"
+            "('Odessa','Europe',46.4,30.7),"
+            "('New York','America',40.7,-74.0),"
+            "('Shanghai','Asia',31.2,121.5);"
+        );
+        execOrThrow(db, "COMMIT;");
+        std::cout << "[Db] Ports seeded\n";
+    } catch (...) {
+        sqlite3_exec(db, "ROLLBACK;", nullptr, nullptr, nullptr);
+        throw;
+    }
+}
+
+void seedShipsIfEmpty(sqlite3* db) {
+    const int cnt = scalarInt(db, "SELECT COUNT(*) FROM ships;");
+    if (cnt != 0) return;
+
+    execOrThrow(db, "BEGIN;");
+    try {
+        execOrThrow(db,
+            "INSERT INTO ships (name, type, country, port_id) VALUES "
+            "('Hetman Sahaydachny','military','Ukraine',(SELECT id FROM ports WHERE name='Odessa')),"
+            "('Mriya Sea','cargo','Ukraine',(SELECT id FROM ports WHERE name='Odessa')),"
+            "('USS Enterprise','military','USA',(SELECT id FROM ports WHERE name='New York')),"
+            "('Liberty Star','passenger','USA',(SELECT id FROM ports WHERE name='New York')),"
+            "('Cosco Hope','cargo','China',(SELECT id FROM ports WHERE name='Shanghai')),"
+            "('Red Dragon','military','China',(SELECT id FROM ports WHERE name='Shanghai')),"
+            "('Euro Queen','passenger','Germany',(SELECT id FROM ports WHERE name='Hamburg'));"
+        );
+        execOrThrow(db, "COMMIT;");
+        std::cout << "[Db] Fleet seeded successfully!\n";
+    } catch (...) {
+        sqlite3_exec(db, "ROLLBACK;", nullptr, nullptr, nullptr);
+        throw;
+    }
+}
+
+} // namespace
+
+Db& Db::instance() { // <-- без noexcept
     static Db inst;
     return inst;
 }
@@ -22,15 +110,23 @@ Db& Db::instance() {
 Db::Db() {
     namespace fs = std::filesystem;
     fs::create_directories("data");
+
     const char* path = "data/app.db";
-    if (sqlite3_open(path, &db_) != SQLITE_OK)
-        throw std::runtime_error("sqlite open failed");
-    sqlite3_exec(db_, "PRAGMA foreign_keys = ON;", nullptr, nullptr, nullptr);
+    if (sqlite3_open(path, &db_) != SQLITE_OK) {
+        std::string msg = db_ ? sqlite3_errmsg(db_) : "sqlite open failed";
+        throw std::runtime_error(msg);
+    }
+
+    execOrThrow(db_, "PRAGMA foreign_keys = ON;");
+
     runMigrations();
 }
 
 Db::~Db() {
-    if (db_) sqlite3_close(db_);
+    if (db_) {
+        sqlite3_close(db_);
+        db_ = nullptr;
+    }
 }
 
 void Db::runMigrations() {
@@ -54,6 +150,7 @@ void Db::runMigrations() {
         "  description TEXT"
         ");"
     );
+
     // seed ship_types
     execOrThrow(db_,
         "INSERT OR IGNORE INTO ship_types(code,name,description) VALUES"
@@ -99,11 +196,13 @@ void Db::runMigrations() {
         ");"
     );
 
-    // --- ships.company_id (для старих БД додаємо стовпчик, якщо вже є — ігноруємо помилку) ---
-    sqlite3_exec(db_, "ALTER TABLE ships ADD COLUMN company_id INTEGER", nullptr, nullptr, nullptr);
-    sqlite3_exec(db_, "CREATE INDEX IF NOT EXISTS idx_ships_company ON ships(company_id)", nullptr, nullptr, nullptr);
+    // --- ships.company_id ---
+    if (!columnExists(db_, "ships", "company_id")) {
+        execOrThrow(db_, "ALTER TABLE ships ADD COLUMN company_id INTEGER;");
+    }
+    execOrThrow(db_, "CREATE INDEX IF NOT EXISTS idx_ships_company ON ships(company_id);");
 
-    // --- COMPANY_PORTS (зв'язок компанія ↔ порт) ---
+    // --- COMPANY_PORTS ---
     execOrThrow(db_,
         "CREATE TABLE IF NOT EXISTS company_ports ("
         "  company_id INTEGER NOT NULL,"
@@ -114,14 +213,18 @@ void Db::runMigrations() {
         "  FOREIGN KEY(port_id)    REFERENCES ports(id)"
         ");"
     );
+
     execOrThrow(db_,
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_company_main_port "
         "ON company_ports(company_id) WHERE is_main=1;"
     );
+
+    // FIX: дужка + крапка з комою
     execOrThrow(db_,
         "CREATE INDEX IF NOT EXISTS idx_company_ports_port "
         "ON company_ports(port_id);"
     );
+
     execOrThrow(db_,
         "CREATE INDEX IF NOT EXISTS idx_company_ports_company "
         "ON company_ports(company_id);"
@@ -139,71 +242,38 @@ void Db::runMigrations() {
         "  FOREIGN KEY(ship_id)   REFERENCES ships(id)"
         ");"
     );
+
     execOrThrow(db_,
         "CREATE INDEX IF NOT EXISTS idx_crew_ship_active "
         "ON crew_assignments(ship_id) WHERE end_utc IS NULL;"
     );
+
     execOrThrow(db_,
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_crew_person_active "
         "ON crew_assignments(person_id) WHERE end_utc IS NULL;"
     );
+
     execOrThrow(db_, "CREATE INDEX IF NOT EXISTS crew_ship_idx ON crew_assignments(ship_id);");
     execOrThrow(db_, "CREATE INDEX IF NOT EXISTS crew_person_idx ON crew_assignments(person_id);");
 
-    // --- seed PORTS if empty ---
-    {
-        sqlite3_stmt* st{};
-        sqlite3_prepare_v2(db_, "SELECT count(*) FROM ports", -1, &st, nullptr);
-        int cnt = 0;
-        if (sqlite3_step(st) == SQLITE_ROW) cnt = sqlite3_column_int(st, 0);
-        sqlite3_finalize(st);
-        if (cnt == 0) {
-            execOrThrow(db_,
-                "INSERT INTO ports (name, region, lat, lon) VALUES "
-                "('Rotterdam','Europe',51.9,4.4),"
-                "('Hamburg','Europe',53.5,9.9),"
-                "('Odessa','Europe',46.4,30.7),"
-                "('New York','America',40.7,-74.0),"
-                "('Shanghai','Asia',31.2,121.5);"
-            );
-            std::cout << "[Db] Ports seeded\n";
-        }
-    }
-
-    // --- seed SHIPS if empty ---
-    {
-        sqlite3_stmt* st{};
-        sqlite3_prepare_v2(db_, "SELECT count(*) FROM ships", -1, &st, nullptr);
-        int sc = 0;
-        if (sqlite3_step(st) == SQLITE_ROW) sc = sqlite3_column_int(st, 0);
-        sqlite3_finalize(st);
-        if (sc == 0) {
-            execOrThrow(db_,
-                "INSERT INTO ships (name, type, country, port_id) VALUES "
-                "('Hetman Sahaydachny','Military','Ukraine',(SELECT id FROM ports WHERE name='Odessa')),"
-                "('Mriya Sea','Cargo','Ukraine',(SELECT id FROM ports WHERE name='Odessa')),"
-                "('USS Enterprise','Military','USA',(SELECT id FROM ports WHERE name='New York')),"
-                "('Liberty Star','Passenger','USA',(SELECT id FROM ports WHERE name='New York')),"
-                "('Cosco Hope','Cargo','China',(SELECT id FROM ports WHERE name='Shanghai')),"
-                "('Red Dragon','Military','China',(SELECT id FROM ports WHERE name='Shanghai')),"
-                "('Euro Queen','Passenger','Germany',(SELECT id FROM ports WHERE name='Hamburg'));"
-            );
-            std::cout << "[Db] Fleet seeded successfully!\n";
-        }
-    }
+    // --- seed PORTS / SHIPS ---
+    seedPortsIfEmpty(db_);
+    seedShipsIfEmpty(db_);
 }
 
 void Db::reset() {
-    // для тестів: чистимо тільки crew & ships (довідники лишаємо)
     char* err = nullptr;
+
     sqlite3_exec(db_, "DELETE FROM crew_assignments;", nullptr, nullptr, &err);
-    if (err) sqlite3_free(err);
+    if (err) { sqlite3_free(err); err = nullptr; }
+
     sqlite3_exec(db_, "DELETE FROM ships;", nullptr, nullptr, &err);
-    if (err) sqlite3_free(err);
+    if (err) { sqlite3_free(err); err = nullptr; }
+
     sqlite3_exec(
         db_,
         "DELETE FROM sqlite_sequence WHERE name IN ('crew_assignments','ships');",
         nullptr, nullptr, &err
     );
-    if (err) sqlite3_free(err);
+    if (err) { sqlite3_free(err); err = nullptr; }
 }

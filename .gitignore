@@ -1,0 +1,21 @@
+﻿build/
+**/build/
+.vs/
+.vscode/
+*.user
+*.suo
+*.log
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# DB / runtime
+backend/data/
+backend/logs/
+backend/uploads/
+*.db
+
+# vcpkg (якщо раптом є локально в репо)
+vcpkg_installed/

@@ -26,6 +26,9 @@ BROTLIENC_LIBRARY:FILEPATH=C:/Users/user/vcpkg/installed/x64-windows/lib/brotlie
 //Path to a file.
 BROTLI_INCLUDE_DIR:PATH=C:/Users/user/vcpkg/installed/x64-windows/include
 
+//Build the testing tree.
+BUILD_TESTING:BOOL=ON
+
 //Path to a program.
 CMAKE_AR:FILEPATH=C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/lib.exe
 
@@ -188,6 +191,19 @@ CMAKE_TOOLCHAIN_FILE:UNINITIALIZED=C:/Users/user/vcpkg/scripts/buildsystems/vcpk
 // Studio IDE projects all commands are done without /nologo.
 CMAKE_VERBOSE_MAKEFILE:BOOL=FALSE
 
+//Path to the coverage program that CTest uses for performing coverage
+// inspection
+COVERAGE_COMMAND:FILEPATH=COVERAGE_COMMAND-NOTFOUND
+
+//Extra command line flags to pass to the coverage tool
+COVERAGE_EXTRA_FLAGS:STRING=-l
+
+//How many times to retry timed-out CTest submissions.
+CTEST_SUBMIT_RETRY_COUNT:STRING=3
+
+//How long to wait between timed-out CTest submissions.
+CTEST_SUBMIT_RETRY_DELAY:STRING=5
+
 //TRUE if we have the C++ filesystem headers
 CXX_FILESYSTEM_HAVE_FS:BOOL=TRUE
 
@@ -199,6 +215,9 @@ CXX_FILESYSTEM_IS_EXPERIMENTAL:BOOL=FALSE
 
 //The C++ namespace that contains the filesystem APIs
 CXX_FILESYSTEM_NAMESPACE:STRING=std::filesystem
+
+//Maximum time allowed before CTest will kill the test.
+DART_TESTING_TIMEOUT:STRING=1500
 
 //The directory containing a CMake configuration file for Drogon.
 Drogon_DIR:PATH=C:/Users/user/vcpkg/installed/x64-windows/share/drogon
@@ -221,11 +240,23 @@ LIB_EAY_DEBUG:FILEPATH=C:/Users/user/vcpkg/installed/x64-windows/debug/lib/libcr
 //Path to a library.
 LIB_EAY_RELEASE:FILEPATH=C:/Users/user/vcpkg/installed/x64-windows/lib/libcrypto.lib
 
+//Command to build the project
+MAKECOMMAND:STRING="C:\Program Files\CMake\bin\cmake.exe" --build . --config "${CTEST_CONFIGURATION_TYPE}"
+
+//Path to the memory checking command, used for memory error detection.
+MEMORYCHECK_COMMAND:FILEPATH=MEMORYCHECK_COMMAND-NOTFOUND
+
+//File that contains suppressions for the memory checker
+MEMORYCHECK_SUPPRESSIONS_FILE:FILEPATH=
+
 //Path to a file.
 OPENSSL_APPLINK_SOURCE:FILEPATH=C:/Users/user/vcpkg/installed/x64-windows/include/openssl/applink.c
 
 //Path to a file.
 OPENSSL_INCLUDE_DIR:PATH=C:/Users/user/vcpkg/installed/x64-windows/include
+
+//Name of the computer/site where compile is being run
+SITE:STRING=DESKTOP-KJN5J7U
 
 //Path to a library.
 SSL_EAY_DEBUG:FILEPATH=C:/Users/user/vcpkg/installed/x64-windows/debug/lib/libssl.lib
@@ -331,6 +362,8 @@ CMAKE_CACHE_PATCH_VERSION:INTERNAL=2
 CMAKE_COMMAND:INTERNAL=C:/Program Files/CMake/bin/cmake.exe
 //Path to cpack program executable.
 CMAKE_CPACK_COMMAND:INTERNAL=C:/Program Files/CMake/bin/cpack.exe
+//ADVANCED property for variable: CMAKE_CTEST_COMMAND
+CMAKE_CTEST_COMMAND-ADVANCED:INTERNAL=1
 //Path to ctest program executable.
 CMAKE_CTEST_COMMAND:INTERNAL=C:/Program Files/CMake/bin/ctest.exe
 //ADVANCED property for variable: CMAKE_CXX_FLAGS
@@ -441,12 +474,22 @@ CMAKE_STATIC_LINKER_FLAGS_RELWITHDEBINFO-ADVANCED:INTERNAL=1
 CMAKE_TOOLCHAIN_FILE-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_VERBOSE_MAKEFILE
 CMAKE_VERBOSE_MAKEFILE-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: COVERAGE_COMMAND
+COVERAGE_COMMAND-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: COVERAGE_EXTRA_FLAGS
+COVERAGE_EXTRA_FLAGS-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CTEST_SUBMIT_RETRY_COUNT
+CTEST_SUBMIT_RETRY_COUNT-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CTEST_SUBMIT_RETRY_DELAY
+CTEST_SUBMIT_RETRY_DELAY-ADVANCED:INTERNAL=1
 //Test CXX_FILESYSTEM_NO_LINK_NEEDED
 CXX_FILESYSTEM_NO_LINK_NEEDED:INTERNAL=1
 //Result of TRY_COMPILE
 CXX_FILESYSTEM_NO_LINK_NEEDED_COMPILED:INTERNAL=TRUE
 //Result of try_run()
 CXX_FILESYSTEM_NO_LINK_NEEDED_EXITCODE:INTERNAL=0
+//ADVANCED property for variable: DART_TESTING_TIMEOUT
+DART_TESTING_TIMEOUT-ADVANCED:INTERNAL=1
 //Details about finding Brotli
 FIND_PACKAGE_MESSAGE_DETAILS_Brotli:INTERNAL=[C:/Users/user/vcpkg/installed/x64-windows/lib/brotlidec.lib][C:/Users/user/vcpkg/installed/x64-windows/lib/brotlienc.lib][C:/Users/user/vcpkg/installed/x64-windows/lib/brotlicommon.lib][C:/Users/user/vcpkg/installed/x64-windows/include][v()]
 //Details about finding Jsoncpp
@@ -463,8 +506,16 @@ FIND_PACKAGE_MESSAGE_DETAILS_nlohmann_json:INTERNAL=[C:/Users/user/vcpkg/install
 JSONCPP_INCLUDE_DIRS-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: JSONCPP_LIBRARIES
 JSONCPP_LIBRARIES-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: MAKECOMMAND
+MAKECOMMAND-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: MEMORYCHECK_COMMAND
+MEMORYCHECK_COMMAND-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: MEMORYCHECK_SUPPRESSIONS_FILE
+MEMORYCHECK_SUPPRESSIONS_FILE-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: OPENSSL_INCLUDE_DIR
 OPENSSL_INCLUDE_DIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: SITE
+SITE-ADVANCED:INTERNAL=1
 //Install the dependencies listed in your manifest:
 //\n    If this is off, you will have to manually install your dependencies.
 //\n    See https://github.com/microsoft/vcpkg/tree/master/docs/specifications/manifests.md

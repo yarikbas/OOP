@@ -1,22 +1,32 @@
 ﻿#include <drogon/drogon.h>
 #include "db/Db.h"
-using namespace drogon;
+#include <iostream>
 
 int main() {
-    // Ініціалізуємо БД (створить схему та посіє порти за потреби)
-    Db::instance();
+    try {
+        // ініціалізація БД + міграції
+        Db::instance().runMigrations();
+    } catch (const std::exception& e) {
+        std::cerr << "[Db] init failed: " << e.what() << std::endl;
+        return 3;
+    }
 
-    // Завантажуємо конфіг (порт 8081, шляхи logs/uploads, рівень логів тощо)
-    app().loadConfigFile("config.json");
+    // health endpoint
+    drogon::app().registerHandler(
+        "/health",
+        [](const drogon::HttpRequestPtr&,
+           std::function<void (const drogon::HttpResponsePtr&)>&& cb) {
 
-    // /health
-    app().registerHandler("/health",
-        [](const HttpRequestPtr&, std::function<void(const HttpResponsePtr&)>&& cb){
-            auto r = HttpResponse::newHttpResponse();
-            r->setContentTypeCode(CT_APPLICATION_JSON);
-            r->setBody(R"({"status":"ok"})");
-            cb(r);
-        }, {Get});
+            auto resp = drogon::HttpResponse::newHttpResponse();
+            resp->setStatusCode(drogon::k200OK);
+            resp->setBody("OK");
+            cb(resp);
+        },
+        {drogon::Get}
+    );
 
-    app().run();
+    drogon::app().loadConfigFile("config.json");
+    drogon::app().run();
+
+    return 0;
 }

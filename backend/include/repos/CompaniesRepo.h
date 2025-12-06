@@ -1,27 +1,29 @@
 ﻿#pragma once
-#include "models/Port.h"
-#include <vector>
-#include <optional>
+
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <vector>
+
 #include "models/Company.h"
-#include "repos/PortsRepo.h"
+#include "models/Port.h"
 #include "models/Ship.h"
 
 class CompaniesRepo {
 public:
+    using Id = std::int64_t;
+
     std::vector<Company> all();
-    std::optional<Company> byId(std::int64_t id);
+    std::optional<Company> byId(Id id);
     Company create(const std::string& name);
-    bool update(std::int64_t id, const std::string& name);
-    bool remove(std::int64_t id);
+    bool update(Id id, const std::string& name);
+    bool remove(Id id);
 
     // офіси компанії
-    std::vector<Port> ports(std::int64_t companyId);
-    bool addPort(std::int64_t companyId, std::int64_t portId, bool isHq);
-    bool removePort(std::int64_t companyId, std::int64_t portId);
+    std::vector<Port> ports(Id companyId);
+    bool addPort(Id companyId, Id portId, bool isHq);
+    bool removePort(Id companyId, Id portId);
 
     // кораблі компанії
-    std::vector<Ship> ships(std::int64_t companyId);
+    std::vector<Ship> ships(Id companyId);
 };
-

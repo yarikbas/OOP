@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Site BuildName="(empty)"
+<Site BuildName="Win32-MSBuild"
 	BuildStamp="20251206-1058-Experimental"
-	Name="(empty)"
+	Name="DESKTOP-KJN5J7U"
 	Generator="ctest-4.1.2"
-	CompilerName=""
-	CompilerVersion=""
+	CompilerName="C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/cl.exe"
+	CompilerVersion="19.44.35220.0"
 	OSName="Windows"
 	Hostname="DESKTOP-KJN5J7U"
 	OSRelease=" Personal"
@@ -25,11 +25,11 @@
 	ProcessorClockFrequency="1700"
 	>
 	<Testing>
-		<StartDateTime>Dec 06 13:08 Գ[NON-UTF-8-BYTE-0xED][NON-UTF-8-BYTE-0xEB][NON-UTF-8-BYTE-0xFF][NON-UTF-8-BYTE-0xED][NON-UTF-8-BYTE-0xE4][NON-UTF-8-BYTE-0xB3][NON-UTF-8-BYTE-0xFF] ([NON-UTF-8-BYTE-0xE7][NON-UTF-8-BYTE-0xE8][NON-UTF-8-BYTE-0xEC][NON-UTF-8-BYTE-0xE0])</StartDateTime>
-		<StartTestTime>1765019290</StartTestTime>
+		<StartDateTime>Dec 06 18:43 Գ[NON-UTF-8-BYTE-0xED][NON-UTF-8-BYTE-0xEB][NON-UTF-8-BYTE-0xFF][NON-UTF-8-BYTE-0xED][NON-UTF-8-BYTE-0xE4][NON-UTF-8-BYTE-0xB3][NON-UTF-8-BYTE-0xFF] ([NON-UTF-8-BYTE-0xE7][NON-UTF-8-BYTE-0xE8][NON-UTF-8-BYTE-0xEC][NON-UTF-8-BYTE-0xE0])</StartDateTime>
+		<StartTestTime>1765039400</StartTestTime>
 		<TestList/>
-		<EndDateTime>Dec 06 13:08 Գ[NON-UTF-8-BYTE-0xED][NON-UTF-8-BYTE-0xEB][NON-UTF-8-BYTE-0xFF][NON-UTF-8-BYTE-0xED][NON-UTF-8-BYTE-0xE4][NON-UTF-8-BYTE-0xB3][NON-UTF-8-BYTE-0xFF] ([NON-UTF-8-BYTE-0xE7][NON-UTF-8-BYTE-0xE8][NON-UTF-8-BYTE-0xEC][NON-UTF-8-BYTE-0xE0])</EndDateTime>
-		<EndTestTime>1765019290</EndTestTime>
+		<EndDateTime>Dec 06 18:43 Գ[NON-UTF-8-BYTE-0xED][NON-UTF-8-BYTE-0xEB][NON-UTF-8-BYTE-0xFF][NON-UTF-8-BYTE-0xED][NON-UTF-8-BYTE-0xE4][NON-UTF-8-BYTE-0xB3][NON-UTF-8-BYTE-0xFF] ([NON-UTF-8-BYTE-0xE7][NON-UTF-8-BYTE-0xE8][NON-UTF-8-BYTE-0xEC][NON-UTF-8-BYTE-0xE0])</EndDateTime>
+		<EndTestTime>1765039400</EndTestTime>
 		<ElapsedMinutes>0</ElapsedMinutes>
 	</Testing>
 </Site>

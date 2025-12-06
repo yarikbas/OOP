@@ -6,15 +6,56 @@ from datetime import datetime, timezone
 st.set_page_config(page_title="Crew & People", page_icon="🧑‍✈️", layout="wide")
 st.title("🧑‍✈️ Управління Екіпажем та Персоналом")
 
-# ===== ФІКСОВАНІ ПРОФЕСІЇ З ДОМЕНУ =====
+# ============================================================
+# ВАЖЛИВО:
+# Бекенд зараз перевіряє rank українськими рядками
+# ("Капітан", "Інженер", "Дослідник", "Солдат").
+# Тому UI зберігає в БД саме LABEL.
+# ============================================================
+
 PROFESSIONS = [
-    ("Engineer", "Інженер"),
-    ("Soldier", "Солдат"),
+    ("Captain",    "Капітан"),
+    ("Engineer",   "Інженер"),
+    ("Soldier",    "Солдат"),
     ("Researcher", "Дослідник"),
 ]
-PROF_LABEL_BY_CODE = {code: label for code, label in PROFESSIONS}
-LABEL_BY_CODE = PROF_LABEL_BY_CODE
+
+LABEL_BY_CODE = {code: label for code, label in PROFESSIONS}
 CODE_BY_LABEL = {label: code for code, label in PROFESSIONS}
+
+PROF_LABELS = [label for _, label in PROFESSIONS]
+
+def rank_to_db(label: str) -> str:
+    """Зберігаємо в БД український label для сумісності з бекендом."""
+    return label
+
+def rank_to_ui_label(raw_rank: str) -> str:
+    """
+    Показ у UI:
+    - якщо в БД раптом лежить code — перетворюємо на label
+    - якщо вже label — повертаємо як є
+    """
+    if not raw_rank:
+        return ""
+    if raw_rank in LABEL_BY_CODE:
+        return LABEL_BY_CODE[raw_rank]  # raw is code
+    return raw_rank  # raw is already label (expected)
+
+def default_prof_index_from_db_rank(raw_rank: str) -> int:
+    """Підбирає дефолт для selectbox професій при update."""
+    if not raw_rank:
+        return 0
+
+    # raw_rank може бути і code, і label
+    if raw_rank in LABEL_BY_CODE:
+        label = LABEL_BY_CODE[raw_rank]
+    else:
+        label = raw_rank
+
+    try:
+        return PROF_LABELS.index(label)
+    except ValueError:
+        return 0
 
 # Показати останнє повідомлення про успіх, якщо є
 if "last_success" in st.session_state:
@@ -22,12 +63,11 @@ if "last_success" in st.session_state:
 
 # ================== ЗАВАНТАЖЕННЯ ДАНИХ ==================
 try:
-    ships_df = api.get_ships()
+    ships_df  = api.get_ships()
     people_df = api.get_people()
 
-    ship_name_map = api.get_ship_name_map()
+    ship_name_map   = api.get_ship_name_map()
     person_name_map = api.get_person_name_map()
-
 except Exception as e:
     st.error(f"Не вдалося завантажити довідники: {e}")
     st.stop()
@@ -50,6 +90,8 @@ with tab_crew:
         st.warning("Немає кораблів. Спочатку створіть корабель.")
     elif people_df.empty:
         st.warning("Немає людей. Спочатку створіть людину.")
+    elif not ship_name_map:
+        st.warning("Не вдалося побудувати список кораблів для вибору.")
     else:
         # --- Вибір Корабля ---
         selected_ship_id = st.selectbox(
@@ -61,18 +103,16 @@ with tab_crew:
         selected_ship_name = ship_name_map.get(selected_ship_id, "Н/Д")
         st.markdown(f"**Обрано:** {selected_ship_name}")
 
-        col_assign, col_unassign, col_history = st.columns([1, 1, 1.5])
+        col_assign, col_unassign, col_current = st.columns([1, 1, 1.5])
 
         # ---------- Колонка 1: Призначити ----------
         with col_assign:
             st.markdown("#### ➕ Призначити")
 
-            # Знаходимо людей, які ще НЕ в активному екіпажі
             active_person_ids = api.get_all_active_person_ids()
 
-            if not people_df.empty and "id" in people_df.columns:
-                mask_free = ~people_df["id"].isin(active_person_ids)
-                available_people = people_df[mask_free]
+            if "id" in people_df.columns:
+                available_people = people_df[~people_df["id"].isin(active_person_ids)]
             else:
                 available_people = pd.DataFrame()
 
@@ -109,64 +149,58 @@ with tab_crew:
             st.markdown("#### ➖ Зняти")
 
             crew_df = api.get_ship_crew(selected_ship_id)
-            if crew_df.empty or "end_utc" not in crew_df.columns:
-                st.info("На кораблі немає екіпажу.")
+
+            if crew_df.empty or "person_id" not in crew_df.columns:
+                st.info("На кораблі немає активного екіпажу.")
             else:
-                active_crew = crew_df[crew_df["end_utc"].isna()]
-                if active_crew.empty:
-                    st.info("На кораблі немає *активних* членів екіпажу.")
-                else:
-                    with st.form("unassign_form"):
-                        active_person_options = active_crew["person_id"].tolist()
-                        selected_active_person_id = st.selectbox(
-                            "Оберіть активного члена екіпажу",
-                            active_person_options,
-                            format_func=lambda x: person_name_map.get(x, "Н/Д"),
+                with st.form("unassign_form"):
+                    active_person_options = crew_df["person_id"].tolist()
+                    selected_active_person_id = st.selectbox(
+                        "Оберіть активного члена екіпажу",
+                        active_person_options,
+                        format_func=lambda x: person_name_map.get(x, "Н/Д"),
+                    )
+                    submitted = st.form_submit_button("Зняти з корабля", type="primary")
+
+                    if submitted:
+                        now_utc = datetime.now(timezone.utc).isoformat()
+                        payload = {
+                            "person_id": int(selected_active_person_id),
+                            "end_utc": now_utc,
+                        }
+                        api.api_post(
+                            "/api/crew/end",
+                            payload,
+                            success_msg=(
+                                f"Людина (id={selected_active_person_id}) "
+                                f"знята з корабля."
+                            ),
                         )
-                        submitted = st.form_submit_button(
-                            "Зняти з корабля", type="primary"
-                        )
 
-                        if submitted:
-                            now_utc = datetime.now(timezone.utc).isoformat()
-                            payload = {
-                                "person_id": int(selected_active_person_id),
-                                "end_utc": now_utc,
-                            }
-                            api.api_post(
-                                "/api/crew/end",
-                                payload,
-                                success_msg=(
-                                    f"Людина (id={selected_active_person_id}) "
-                                    f"знята з корабля."
-                                ),
-                            )
+        # ---------- Колонка 3: Поточний екіпаж ----------
+        with col_current:
+            st.markdown("#### 👥 Поточний екіпаж")
 
-        # ---------- Колонка 3: Історія ----------
-        with col_history:
-            st.markdown("#### 📜 Список екіпажу")
-
-            crew_df_history = api.get_ship_crew(selected_ship_id)
-            if crew_df_history.empty:
-                st.caption("Історія екіпажу для цього корабля порожня.")
+            crew_df_current = api.get_ship_crew(selected_ship_id)
+            if crew_df_current.empty:
+                st.caption("Поточний екіпаж порожній.")
             else:
-                # Мерджимо імена
-                if not people_df.empty and "id" in people_df.columns:
+                # Мерджимо імена/ранги
+                if not people_df.empty and {"id", "full_name", "rank"}.issubset(people_df.columns):
                     people_small = people_df[["id", "full_name", "rank"]].rename(
                         columns={"id": "person_id"}
                     )
-                    crew_df_history = crew_df_history.merge(
+                    crew_df_current = crew_df_current.merge(
                         people_small, on="person_id", how="left"
                     )
 
-                # Підміняємо код професії на «людську» назву
-                if "rank" in crew_df_history.columns:
-                    crew_df_history["rank"] = crew_df_history["rank"].map(
-                        lambda c: LABEL_BY_CODE.get(c, str(c))
+                if "rank" in crew_df_current.columns:
+                    crew_df_current["rank"] = crew_df_current["rank"].map(
+                        lambda r: rank_to_ui_label(str(r))
                     )
 
                 st.dataframe(
-                    api.df_1based(crew_df_history),
+                    api.df_1based(crew_df_current),
                     use_container_width=True,
                     height=400,
                     column_order=(
@@ -174,7 +208,6 @@ with tab_crew:
                         "full_name",
                         "rank",
                         "start_utc",
-                        "end_utc",
                     ),
                 )
 
@@ -192,9 +225,8 @@ with tab_people:
     with people_crud_tabs[0]:
         st.subheader("Список персоналу")
 
-        # мапа person_id -> ship_id
         active_ship_map = api.get_active_ship_map()
-        ship_name_map = api.get_ship_name_map()
+        ship_name_map2  = api.get_ship_name_map()
 
         people_view = people_df.copy()
 
@@ -204,23 +236,16 @@ with tab_people:
                     pid = int(person_id)
                 except Exception:
                     return ""
-
                 ship_id = active_ship_map.get(pid)
                 if not ship_id:
                     return ""
-                return ship_name_map.get(
-                    ship_id,
-                    f"Ship id={ship_id}",
-                )
+                return ship_name_map2.get(ship_id, f"Ship id={ship_id}")
 
-            people_view["current_ship"] = people_view["id"].map(
-                current_ship_label
-            )
+            people_view["current_ship"] = people_view["id"].map(current_ship_label)
 
-            # Показувати професії «по-людськи»
             if "rank" in people_view.columns:
                 people_view["rank"] = people_view["rank"].map(
-                    lambda c: LABEL_BY_CODE.get(c, str(c))
+                    lambda r: rank_to_ui_label(str(r))
                 )
 
             cols_order = []
@@ -240,13 +265,11 @@ with tab_people:
         with st.form("create_person_form"):
             full_name = st.text_input("Повне ім'я")
 
-            profession_labels = [label for _, label in PROFESSIONS]
             selected_label = st.selectbox(
                 "Професія",
-                options=profession_labels,
+                options=PROF_LABELS,
                 key="create_profession_select",
             )
-            rank_code = CODE_BY_LABEL[selected_label]
 
             active = st.checkbox("Активний", value=True)
 
@@ -256,8 +279,8 @@ with tab_people:
                         "/api/people",
                         {
                             "full_name": full_name,
-                            "rank": rank_code,        # 👈 Engineer / Soldier / Researcher
-                            "active": int(active),
+                            "rank": rank_to_db(selected_label),  # 👈 ЗБЕРІГАЄМО LABEL
+                            "active": bool(active),
                         },
                         success_msg=f"Людина '{full_name}' створена.",
                     )
@@ -275,35 +298,24 @@ with tab_people:
                 format_func=lambda x: person_name_map.get(x, "Н/Д"),
                 key="person_update_select",
             )
-            selected_person = people_df[
-                people_df["id"] == person_id_to_update
-            ].iloc[0]
+            selected_person = people_df[people_df["id"] == person_id_to_update].iloc[0]
 
             with st.form("update_person_form"):
-                st.write(f"Оновлення: {selected_person['full_name']}")
+                st.write(f"Оновлення: {selected_person.get('full_name', '')}")
+
                 new_full_name = st.text_input(
-                    "Повне ім'я", value=selected_person["full_name"]
+                    "Повне ім'я", value=str(selected_person.get("full_name", ""))
                 )
 
-                # поточний код професії в БД
-                current_rank_code = selected_person.get("rank", "")
-
-                profession_labels = [label for _, label in PROFESSIONS]
-                default_index = 0
-                if current_rank_code in LABEL_BY_CODE:
-                    current_label = LABEL_BY_CODE[current_rank_code]
-                    try:
-                        default_index = profession_labels.index(current_label)
-                    except ValueError:
-                        default_index = 0
+                current_rank_raw = str(selected_person.get("rank", ""))
+                default_index = default_prof_index_from_db_rank(current_rank_raw)
 
                 selected_label = st.selectbox(
                     "Професія",
-                    options=profession_labels,
+                    options=PROF_LABELS,
                     index=default_index,
                     key="update_profession_select",
                 )
-                new_rank_code = CODE_BY_LABEL[selected_label]
 
                 new_active = st.checkbox(
                     "Активний",
@@ -316,12 +328,10 @@ with tab_people:
                             f"/api/people/{person_id_to_update}",
                             {
                                 "full_name": new_full_name,
-                                "rank": new_rank_code,
-                                "active": int(new_active),
+                                "rank": rank_to_db(selected_label),  # 👈 LABEL
+                                "active": bool(new_active),
                             },
-                            success_msg=(
-                                f"Дані '{new_full_name}' оновлено."
-                            ),
+                            success_msg=f"Дані '{new_full_name}' оновлено.",
                         )
                     else:
                         st.error("Повне ім'я є обов'язковим.")
@@ -339,10 +349,7 @@ with tab_people:
             )
             person_name = person_name_map.get(person_id_to_delete, "Н/Д")
 
-            if st.button(
-                f"❌ Видалити '{person_name}'",
-                type="primary",
-            ):
+            if st.button(f"❌ Видалити '{person_name}'", type="primary"):
                 api.api_del(
                     f"/api/people/{person_id_to_delete}",
                     success_msg=f"Людина '{person_name}' видалена.",

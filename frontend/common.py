@@ -1,28 +1,50 @@
+import os
 import streamlit as st
 import requests
 import pandas as pd
-from datetime import datetime, timezone
 
 # ================== КОНФІГ ==================
-BASE_URL = "http://127.0.0.1:8081"
+BASE_URL = os.getenv("FLEET_BASE_URL", "http://127.0.0.1:8082")
 
-# ================== ОЧИЩЕННЯ КЕШУ ==================
+# Реюз TCP-з'єднань
+_SESSION = requests.Session()
+
+# TTL можна централізувати
+TTL_SHORT = 3
+TTL_MED = 5
+TTL_LONG = 15
 
 
+# ================== КЕШ / ОЧИЩЕННЯ ==================
 def clear_all_caches():
     """
     Викликається після кожної POST/PUT/DELETE дії,
     щоб змусити UI оновити дані з сервера.
     """
-    get_ports.clear()
-    get_ship_types.clear()
-    get_ships.clear()
-    get_companies.clear()
-    get_people.clear()
-    get_ship_crew.clear()
-    get_all_active_person_ids.clear()
-    get_company_ports.clear()
-    get_active_ship_map.clear()
+    # Найнадійніше: очистка всього cache_data в межах додатку
+    try:
+        st.cache_data.clear()
+        return
+    except Exception:
+        pass
+
+    # Fallback (на випадок змін у Streamlit)
+    for fn in [
+        get_ports,
+        get_ship_types,
+        get_ships,
+        get_companies,
+        get_people,
+        get_ship_crew,
+        get_all_active_person_ids,
+        get_company_ports,
+        get_active_ship_map,
+        get_active_assignments,
+    ]:
+        try:
+            fn.clear()
+        except Exception:
+            continue
 
 
 def df_1based(df: pd.DataFrame) -> pd.DataFrame:
@@ -34,19 +56,19 @@ def df_1based(df: pd.DataFrame) -> pd.DataFrame:
         return df
     df = df.copy()
     df.index = range(1, len(df) + 1)
-    df.index.name = "#"   # просто гарний заголовок для індекса
+    df.index.name = "#"
     return df
 
+
 # ================== API ХЕЛПЕРИ (CRUD) ==================
-
-
 def _handle_api_error(resp: requests.Response, action: str):
     """Внутрішній хелпер для обробки помилок API."""
     try:
         data = resp.json()
         msg = data.get("error") or data.get("details") or resp.text
-    except requests.exceptions.JSONDecodeError:
+    except Exception:
         msg = resp.text
+
     st.error(f"{action} failed: {msg} (Code: {resp.status_code})")
     return None
 
@@ -64,9 +86,13 @@ def _after_success(success_msg: str, rerun: bool = True):
         st.rerun()
 
 
+def _url(path: str) -> str:
+    return BASE_URL + path
+
+
 def api_get(path: str):
-    url = BASE_URL + path
-    resp = requests.get(url, timeout=5)
+    url = _url(path)
+    resp = _SESSION.get(url, timeout=5)
     resp.raise_for_status()
     if not resp.text:
         return None
@@ -75,20 +101,22 @@ def api_get(path: str):
 
 def api_post(path: str, payload: dict, success_msg: str, rerun: bool = True):
     """СТВОРЕННЯ (CREATE)."""
-    url = BASE_URL + path
-    resp = requests.post(url, json=payload, timeout=5)
+    url = _url(path)
+    resp = _SESSION.post(url, json=payload, timeout=5)
     if not resp.ok:
         return _handle_api_error(resp, "Create")
 
     data = resp.json() if resp.text else None
+
+    # Якщо rerun=True, повернення практично не використовується
     _after_success(success_msg, rerun=rerun)
-    return data  # фактично не повернеться, якщо rerun=True
+    return data
 
 
 def api_put(path: str, payload: dict, success_msg: str, rerun: bool = True):
     """ОНОВЛЕННЯ (UPDATE)."""
-    url = BASE_URL + path
-    resp = requests.put(url, json=payload, timeout=5)
+    url = _url(path)
+    resp = _SESSION.put(url, json=payload, timeout=5)
     if not resp.ok:
         return _handle_api_error(resp, "Update")
 
@@ -99,49 +127,47 @@ def api_put(path: str, payload: dict, success_msg: str, rerun: bool = True):
 
 def api_del(path: str, success_msg: str, rerun: bool = True):
     """ВИДАЛЕННЯ (DELETE)."""
-    url = BASE_URL + path
-    resp = requests.delete(url, timeout=5)
+    url = _url(path)
+    resp = _SESSION.delete(url, timeout=5)
     if not resp.ok:
         return _handle_api_error(resp, "Delete")
 
     _after_success(success_msg, rerun=rerun)
     return True
 
+
 # ================== КЕШОВАНІ ЧИТАННЯ ==================
-# Всі GET-запити кешуються, щоб не навантажувати бекенд
-
-
-@st.cache_data(ttl=15)
+@st.cache_data(ttl=TTL_LONG)
 def get_ports() -> pd.DataFrame:
     data = api_get("/api/ports") or []
     return pd.DataFrame(data)
 
 
-@st.cache_data(ttl=15)
+@st.cache_data(ttl=TTL_LONG)
 def get_ship_types() -> pd.DataFrame:
     data = api_get("/api/ship-types") or []
     return pd.DataFrame(data)
 
 
-@st.cache_data(ttl=5)
+@st.cache_data(ttl=TTL_MED)
 def get_ships() -> pd.DataFrame:
     data = api_get("/api/ships") or []
     return pd.DataFrame(data)
 
 
-@st.cache_data(ttl=15)
+@st.cache_data(ttl=TTL_LONG)
 def get_companies() -> pd.DataFrame:
     data = api_get("/api/companies") or []
     return pd.DataFrame(data)
 
 
-@st.cache_data(ttl=5)
+@st.cache_data(ttl=TTL_MED)
 def get_people() -> pd.DataFrame:
     data = api_get("/api/people") or []
     return pd.DataFrame(data)
 
 
-@st.cache_data(ttl=3)
+@st.cache_data(ttl=TTL_SHORT)
 def get_ship_crew(ship_id: int) -> pd.DataFrame:
     if not ship_id:
         return pd.DataFrame()
@@ -149,7 +175,7 @@ def get_ship_crew(ship_id: int) -> pd.DataFrame:
     return pd.DataFrame(data)
 
 
-@st.cache_data(ttl=5)
+@st.cache_data(ttl=TTL_MED)
 def get_company_ports(company_id: int) -> pd.DataFrame:
     if not company_id:
         return pd.DataFrame()
@@ -157,74 +183,91 @@ def get_company_ports(company_id: int) -> pd.DataFrame:
     return pd.DataFrame(data)
 
 
-@st.cache_data(ttl=3)
-def get_all_active_person_ids() -> set[int]:
-    """Будуємо множину person_id, які зараз у якійсь команді (end_utc is null)."""
+# ================== АКТИВНІ ПРИЗНАЧЕННЯ (оптимізація N+1 логіки) ==================
+@st.cache_data(ttl=TTL_SHORT)
+def get_active_assignments() -> pd.DataFrame:
+    """
+    Повертає DataFrame активних призначень з колонками:
+    person_id, ship_id, id, start_utc, end_utc (якщо є).
+    Будуємо 1 раз і використовуємо в кількох місцях.
+    """
     ships_df = get_ships()
-    active_ids: set[int] = set()
     if ships_df.empty or "id" not in ships_df.columns:
-        return active_ids
+        return pd.DataFrame(columns=["person_id", "ship_id"])
 
-    for ship_id in ships_df["id"].tolist():
+    rows = []
+    for ship_id in ships_df["id"].dropna().astype(int).tolist():
         try:
             crew_df = get_ship_crew(ship_id)
         except Exception:
             continue
+
         if crew_df.empty or "person_id" not in crew_df.columns:
             continue
 
-        # end_utc == null -> активне призначення
-        mask_active = crew_df["end_utc"].isna()
-        active_ids.update(
-            crew_df.loc[mask_active, "person_id"]
-            .dropna()
-            .astype(int)
-            .tolist()
-        )
-    return active_ids
+        # активні: end_utc == null
+        if "end_utc" in crew_df.columns:
+            crew_df = crew_df[crew_df["end_utc"].isna()].copy()
+
+        if crew_df.empty:
+            continue
+
+        crew_df["ship_id"] = ship_id
+        rows.append(crew_df)
+
+    if not rows:
+        return pd.DataFrame(columns=["person_id", "ship_id"])
+
+    merged = pd.concat(rows, ignore_index=True)
+
+    # Гарантуємо потрібні колонки
+    needed = ["person_id", "ship_id"]
+    for col in needed:
+        if col not in merged.columns:
+            merged[col] = pd.Series(dtype="int64")
+
+    return merged
 
 
-@st.cache_data(ttl=3)
+@st.cache_data(ttl=TTL_SHORT)
+def get_all_active_person_ids() -> set[int]:
+    """Будуємо множину person_id, які зараз у якійсь команді."""
+    df = get_active_assignments()
+    if df.empty or "person_id" not in df.columns:
+        return set()
+
+    return set(
+        df["person_id"]
+        .dropna()
+        .astype(int, errors="ignore")
+        .tolist()
+    )
+
+
+@st.cache_data(ttl=TTL_SHORT)
 def get_active_ship_map() -> dict[int, int]:
     """
-    Повертає словник {person_id: ship_id} для всіх
-    АКТИВНИХ призначень (end_utc is NULL).
+    Повертає словник {person_id: ship_id}
+    для всіх АКТИВНИХ призначень.
     """
-    ships_df = get_ships()
+    df = get_active_assignments()
+    if df.empty or not {"person_id", "ship_id"}.issubset(df.columns):
+        return {}
+
     result: dict[int, int] = {}
-
-    if ships_df.empty or "id" not in ships_df.columns:
-        return result
-
-    for ship_id in ships_df["id"].tolist():
+    for _, row in df.iterrows():
         try:
-            crew_df = get_ship_crew(ship_id)
+            pid = int(row["person_id"])
+            sid = int(row["ship_id"])
+            result[pid] = sid
         except Exception:
             continue
-
-        if crew_df.empty or "person_id" not in crew_df.columns:
-            continue
-
-        mask_active = crew_df["end_utc"].isna()
-        if "person_id" not in crew_df.columns:
-            continue
-
-        active_person_ids = (
-            crew_df.loc[mask_active, "person_id"]
-            .dropna()
-            .astype(int)
-            .tolist()
-        )
-
-        for pid in active_person_ids:
-            result[int(pid)] = int(ship_id)
 
     return result
 
+
 # ================== ХЕЛПЕРИ ДЛЯ UI ==================
-
-
-def get_name_map(df: pd.DataFrame, id_col: str = 'id', name_col: str = 'name') -> dict:
+def get_name_map(df: pd.DataFrame, id_col: str = "id", name_col: str = "name") -> dict:
     """Створює словник {id: name} з DataFrame."""
     if df.empty or id_col not in df.columns or name_col not in df.columns:
         return {}
@@ -237,9 +280,12 @@ def get_ship_name_map() -> dict:
         return {}
 
     def make_label(row):
-        return f"{row['name']} (id={row['id']}, type={row['type']})"
+        name = row.get("name", "")
+        sid = row.get("id", "")
+        stype = row.get("type", "")
+        return f"{name} (id={sid}, type={stype})"
 
-    return {row['id']: make_label(row) for _, row in ships.iterrows()}
+    return {row["id"]: make_label(row) for _, row in ships.iterrows()}
 
 
 def get_person_name_map() -> dict:
@@ -248,6 +294,9 @@ def get_person_name_map() -> dict:
         return {}
 
     def make_label(row):
-        return f"{row['full_name']} (id={row['id']}, rank={row['rank']})"
+        name = row.get("full_name", "")
+        pid = row.get("id", "")
+        rank = row.get("rank", "")
+        return f"{name} (id={pid}, rank={rank})"
 
-    return {row['id']: make_label(row) for _, row in people.iterrows()}
+    return {row["id"]: make_label(row) for _, row in people.iterrows()}
