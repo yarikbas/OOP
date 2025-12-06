@@ -8,7 +8,9 @@
 
 # Python
 .venv/
+**/.venv/
 __pycache__/
+**/__pycache__/
 *.pyc
 
 # DB / runtime
@@ -16,6 +18,9 @@ backend/data/
 backend/logs/
 backend/uploads/
 *.db
+*.db-shm
+*.db-wal
 
-# vcpkg (якщо раптом є локально в репо)
+# vcpkg (якщо випадково є в репо)
 vcpkg_installed/
+**/vcpkg_installed/
