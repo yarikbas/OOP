@@ -1,24 +1,23 @@
 import streamlit as st
 import pandas as pd
-import common as api 
+import common as api
 
-# ================== КОНФІГ ==================
+# ================== КОНФІГ додатку ==================
 st.set_page_config(
     page_title="Fleet Manager Dashboard",
     page_icon="🚢",
     layout="wide",
 )
 
-# Повідомлення про успіх після дій (з common.api_*)
+# Якщо з попередньої дії (CRUD / лінки) прийшло повідомлення про успіх
 if "last_success" in st.session_state:
     st.success(st.session_state.pop("last_success"))
 
-# ================== ЗАВАНТАЖЕННЯ ДАНИХ ==================
+# ================== ЗАВАНТАЖЕННЯ ДАНИХ З BACKEND ==================
 try:
     health = api.api_get("/health")
     if not (health and health.get("status") == "ok"):
-        st.error("Backend status: FAILED")
-        st.stop()
+        raise RuntimeError("Backend /health повернув не 'ok'")
 
     ports_df = api.get_ports()
     ships_df = api.get_ships()
@@ -28,13 +27,13 @@ try:
 
 except Exception as e:
     st.error(f"💥 Backend недоступний за адресою {api.BASE_URL}")
-    st.image("https://http.cat/503", use_container_width=True)
+    st.image("https://http.cat/503", caption="Service Unavailable")
     st.error(f"Деталі помилки: {e}")
     st.stop()
 
-# ================== ТІТУЛ + СТАТИСТИКА ==================
+# ================== ТІТУЛ + ЗАГАЛЬНА СТАТИСТИКА ==================
 st.title("🚢 Fleet Manager Dashboard")
-st.markdown("Огляд стану порту та флоту в реальному часі.")
+st.markdown("Огляд стану портів, флоту, екіпажу та компаній.")
 
 c1, c2, c3, c4, c5 = st.columns(5)
 c1.metric("⚓ Порти", len(ports_df))
@@ -45,13 +44,14 @@ c5.metric("🏢 Компанії", len(companies_df))
 
 st.markdown("---")
 
-# ================== ВИБІР ПОРТУ + ІНФА + КАРТА ==================
-
+# ================== ЯКЩО НЕМАЄ ПОРТІВ – ЗУПИНЯЄМОСЬ ==================
 if ports_df.empty:
     st.warning("Немає жодного порту в БД. Додайте порти на сторінці '⚙️ Admin'.")
     st.stop()
 
+# ================== ВИБІР ПОРТУ + ІНФОРМАЦІЯ + ТАБИ ==================
 port_names = ports_df["name"].tolist()
+
 default_index = 0
 if "selected_port" in st.session_state:
     try:
@@ -80,7 +80,7 @@ with col_info:
         f"(id={sel_port_id}, регіон: {sel_port_row['region']})"
     )
 
-    # Кораблі в цьому порту
+    # Кораблі, що зараз закріплені за цим портом
     ships_in_port = ships_df[ships_df["port_id"] == sel_port_id].copy()
 
     # Компанії, які мають кораблі в цьому порту
@@ -106,54 +106,65 @@ with col_info:
         ["🚢 Кораблі в цьому порту", "🏢 Компанії в порту", "🌍 Всі кораблі"]
     )
 
+    # --- Таб "Кораблі в цьому порту" ---
     with tab_ships:
         if ships_in_port.empty:
             st.info("У цьому порту зараз немає кораблів.")
         else:
+            view_cols = ["id", "name", "type", "country", "status"]
+            if "company_id" in ships_in_port.columns:
+                view_cols.append("company_id")
+
             st.dataframe(
                 api.df_1based(
-                    ships_in_port[
-                        ["id", "name", "type", "country", "status", "company_id"]
-                    ]
+                    ships_in_port[view_cols]
                 ),
-                use_container_width=True,
+                width="stretch",
             )
 
+    # --- Таб "Компанії в порту" ---
     with tab_companies:
         if companies_in_port.empty:
             st.info("У цьому порту зараз немає кораблів жодної компанії.")
         else:
             st.dataframe(
                 api.df_1based(
-                    companies_in_port[["id", "name"]],
+                    companies_in_port[["id", "name"]]
                 ),
-                use_container_width=True,
+                width="stretch",
             )
 
+    # --- Таб "Всі кораблі" ---
     with tab_all:
+        all_view_cols = ["id", "name", "type", "country", "status"]
+        if "port_id" in ships_df.columns:
+            all_view_cols.append("port_id")
+        if "company_id" in ships_df.columns:
+            all_view_cols.append("company_id")
+
         st.dataframe(
             api.df_1based(
-                ships_df[
-                    ["id", "name", "type", "country", "status", "port_id", "company_id"]
-                ]
+                ships_df[all_view_cols]
             ),
-            use_container_width=True,
+            width="stretch",
         )
 
+# ================== КАРТА ПОРТІВ ==================
 with col_map:
     st.subheader("Карта портів")
 
     ports_for_map = ports_df.rename(columns={"lat": "latitude", "lon": "longitude"})
+
     if not {"latitude", "longitude"}.issubset(ports_for_map.columns):
         st.error("У таблиці портів немає координат lat/lon.")
     else:
         st.map(
             ports_for_map[["latitude", "longitude"]],
-            use_container_width=True,
+            width="stretch",
         )
 
 st.markdown("---")
 st.caption(
-    "Для виконання дій (переміщення, атака, управління екіпажем), "
-    "перейдіть на відповідні сторінки у бічному меню."
+    "Для CRUD-управління портами, кораблями, компаніями та зв'язками "
+    "скористайтесь сторінками в бічному меню (наприклад, '⚙️ Admin')."
 )

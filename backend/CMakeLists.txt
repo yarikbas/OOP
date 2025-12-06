@@ -35,22 +35,21 @@ add_executable(oop_backend
     src/controllers/ShipTypesController.cpp
     src/controllers/CompaniesController.cpp
     src/controllers/CrewController.cpp
-    src/controllers/OopDemoController.cpp
 )
 
 target_include_directories(oop_backend PRIVATE include)
 target_link_libraries(oop_backend PRIVATE Drogon::Drogon oop_core)
 
-# ---- tests ----
 add_executable(oop_tests
     tests/ShipsRepoTests.cpp
     tests/PeopleRepoTests.cpp
     tests/ShipTypesRepoTests.cpp
-    # якщо вже створиш:
+    # тимчасово вимикаємо, бо код змінився:
     # tests/PortsRepoTests.cpp
     # tests/CompaniesRepoTests.cpp
-    # tests/CrewRepoTests.cpp
+    tests/CrewRepoTests.cpp
 )
+
 
 target_include_directories(oop_tests PRIVATE include)
 target_link_libraries(oop_tests PRIVATE

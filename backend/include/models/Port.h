@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include <string>
+#include <cstdint>
 
 struct Port {
     long long id{};       // PK

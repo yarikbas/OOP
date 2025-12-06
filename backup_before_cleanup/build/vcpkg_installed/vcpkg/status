@@ -1,0 +1,124 @@
+Package: vcpkg-cmake
+Version: 2024-04-23
+Architecture: x64-windows
+Multi-Arch: same
+Abi: 59aeb7434e9453f27a59237471db04320251fe42ceadc7b2cf3372f303ce0461
+Status: install ok installed
+
+Package: zlib
+Version: 1.3.1
+Depends: vcpkg-cmake
+Architecture: x64-windows
+Multi-Arch: same
+Abi: faa235692c5ae071e3013c87b40176855bdbb75cb5d6a771bc4ed2345f29cc25
+Description: A compression library
+Status: install ok installed
+
+Package: vcpkg-cmake-config
+Version: 2024-05-23
+Architecture: x64-windows
+Multi-Arch: same
+Abi: 987d267b830a1fb69dc70c47144763c071f0d46d4502058d30be352c9aa00bd6
+Status: install ok installed
+
+Package: vcpkg-cmake-get-vars
+Version: 2025-05-29
+Depends: vcpkg-cmake
+Architecture: x64-windows
+Multi-Arch: same
+Abi: e2dc85a82f7e1bc6caaa8f8f40cf5e62b9c8e9ae4d527a00f0010d3b0d4197c2
+Status: install ok installed
+
+Package: openssl
+Version: 3.6.0
+Port-Version: 3
+Depends: vcpkg-cmake, vcpkg-cmake-config, vcpkg-cmake-get-vars
+Architecture: x64-windows
+Multi-Arch: same
+Abi: 9cb9d85920c1f4af5f6dfcf5f65b070fd8336678699c234333b05396c0bde262
+Description: OpenSSL is an open source project that provides a robust, commercial-grade, and full-featured toolkit for the Transport Layer Security (TLS) and Secure Sockets Layer (SSL) protocols. It is also a general-purpose cryptography library.
+Status: install ok installed
+
+Package: c-ares
+Version: 1.34.5
+Port-Version: 1
+Depends: vcpkg-cmake, vcpkg-cmake-config
+Architecture: x64-windows
+Multi-Arch: same
+Abi: 9e80bf51c77dabbca96c334bd993b36c3a24f3adf0bf41bd9242a44ce0cf046b
+Description: A C library for asynchronous DNS requests
+Status: install ok installed
+
+Package: trantor
+Version: 1.5.24
+Depends: c-ares, openssl, vcpkg-cmake, vcpkg-cmake-config
+Architecture: x64-windows
+Multi-Arch: same
+Abi: 3021fc1d04754b56a1441576745f9e83732783c723e95c7633273ba85e323351
+Description: A non-blocking I/O cross-platform TCP network library, using C++14
+Status: install ok installed
+
+Package: jsoncpp
+Version: 1.9.6
+Depends: vcpkg-cmake, vcpkg-cmake-config
+Architecture: x64-windows
+Multi-Arch: same
+Abi: c366d4c71af029bb3760edbf27784ad3f0e963b27d0a19d18102a18e8b8a8b9f
+Description: JsonCpp is a C++ library that allows manipulating JSON values, including serialization and deserialization to and from strings. It can also preserve existing comment in unserialization/serialization steps, making it a convenient format to store user input files.
+Status: install ok installed
+
+Package: brotli
+Version: 1.2.0
+Depends: vcpkg-cmake, vcpkg-cmake-config
+Architecture: x64-windows
+Multi-Arch: same
+Abi: cda7da30ecdaf095b396cf6b5569a831aeb21dad8933c88556b6e51e8182e14b
+Description: a generic-purpose lossless compression algorithm that compresses data using a combination of a modern variant of the LZ77 algorithm, Huffman coding and 2nd order context modeling.
+Status: install ok installed
+
+Package: drogon
+Version: 1.9.11
+Depends: brotli, jsoncpp, trantor, vcpkg-cmake, vcpkg-cmake-config, zlib
+Architecture: x64-windows
+Multi-Arch: same
+Abi: 03f6efebb3671c5d0e29fddaa7027f93ee8857447b66628c9704048cb20e91c0
+Description: A C++14/17 based HTTP web application framework running on Linux/macOS/Unix/Windows
+Status: install ok installed
+
+Package: gtest
+Version: 1.17.0
+Port-Version: 2
+Depends: vcpkg-cmake, vcpkg-cmake-config
+Architecture: x64-windows
+Multi-Arch: same
+Abi: 512b41da500841d2e434e8b7c014f19fd3a15bf583c71ed576d9fc3faa7c939c
+Description: Google Testing and Mocking Framework
+Status: install ok installed
+
+Package: nlohmann-json
+Version: 3.12.0
+Port-Version: 1
+Depends: vcpkg-cmake, vcpkg-cmake-config
+Architecture: x64-windows
+Multi-Arch: same
+Abi: 782d0847607562b58df230f04068572d1a9ce50f0aeefd07b7ed311767a3557f
+Description: JSON for Modern C++
+Status: install ok installed
+
+Package: sqlite3
+Version: 3.51.0
+Depends: vcpkg-cmake, vcpkg-cmake-config
+Architecture: x64-windows
+Multi-Arch: same
+Abi: 254d2ff2b58507233bcfc41a4e0beccc69e053a29817742ac2b0ee352b5e4ccd
+Description: SQLite is a software library that implements a self-contained, serverless, zero-configuration, transactional SQL database engine.
+Default-Features: json1
+Status: install ok installed
+
+Package: sqlite3
+Feature: json1
+Architecture: x64-windows
+Multi-Arch: same
+Description: Enable JSON functionality for sqlite3
+Status: install ok installed
+

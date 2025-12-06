@@ -37,10 +37,11 @@ void Db::runMigrations() {
     // --- PORTS ---
     execOrThrow(db_,
         "CREATE TABLE IF NOT EXISTS ports ("
-        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "  name TEXT UNIQUE NOT NULL,"
-        "  region TEXT NOT NULL,"
-        "  lat REAL, lon REAL"
+        "  id     INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  name   TEXT    NOT NULL UNIQUE,"
+        "  region TEXT    NOT NULL,"
+        "  lat    REAL    NOT NULL,"
+        "  lon    REAL    NOT NULL"
         ");"
     );
 
@@ -102,7 +103,7 @@ void Db::runMigrations() {
     sqlite3_exec(db_, "ALTER TABLE ships ADD COLUMN company_id INTEGER", nullptr, nullptr, nullptr);
     sqlite3_exec(db_, "CREATE INDEX IF NOT EXISTS idx_ships_company ON ships(company_id)", nullptr, nullptr, nullptr);
 
-    // --- COMPANY_PORTS (зв'язок компанія ↔ порт; тільки після створення companies/ports!) ---
+    // --- COMPANY_PORTS (зв'язок компанія ↔ порт) ---
     execOrThrow(db_,
         "CREATE TABLE IF NOT EXISTS company_ports ("
         "  company_id INTEGER NOT NULL,"
@@ -195,8 +196,14 @@ void Db::runMigrations() {
 void Db::reset() {
     // для тестів: чистимо тільки crew & ships (довідники лишаємо)
     char* err = nullptr;
-    sqlite3_exec(db_, "DELETE FROM crew_assignments;", nullptr, nullptr, &err); if (err) sqlite3_free(err);
-    sqlite3_exec(db_, "DELETE FROM ships;", nullptr, nullptr, &err);           if (err) sqlite3_free(err);
-    sqlite3_exec(db_, "DELETE FROM sqlite_sequence WHERE name IN ('crew_assignments','ships');", nullptr, nullptr, &err);
+    sqlite3_exec(db_, "DELETE FROM crew_assignments;", nullptr, nullptr, &err);
+    if (err) sqlite3_free(err);
+    sqlite3_exec(db_, "DELETE FROM ships;", nullptr, nullptr, &err);
+    if (err) sqlite3_free(err);
+    sqlite3_exec(
+        db_,
+        "DELETE FROM sqlite_sequence WHERE name IN ('crew_assignments','ships');",
+        nullptr, nullptr, &err
+    );
     if (err) sqlite3_free(err);
 }
