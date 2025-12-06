@@ -21,6 +21,6 @@ backend/uploads/
 *.db-shm
 *.db-wal
 
-# vcpkg (якщо випадково є в репо)
+# vcpkg
 vcpkg_installed/
 **/vcpkg_installed/
