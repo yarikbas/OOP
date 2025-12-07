@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import streamlit as st
 import pandas as pd
 import common as api
@@ -5,7 +7,7 @@ import common as api
 st.set_page_config(page_title="Ships Management", page_icon="🚢", layout="wide")
 st.title("🚢 Управління кораблями")
 
-# Показати останнє повідомлення про успіх, якщо є
+# Flash
 if "last_success" in st.session_state:
     st.success(st.session_state.pop("last_success"))
 
@@ -20,11 +22,10 @@ except Exception as e:
     st.stop()
 
 # Мапи id -> name
-port_map       = api.get_name_map(ports_df) if not ports_df.empty else {}
-company_map    = api.get_name_map(companies_df) if not companies_df.empty else {}
-ship_type_map  = api.get_name_map(types_df) if not types_df.empty else {}
+port_map    = api.get_name_map(ports_df) if not ports_df.empty else {}
+company_map = api.get_name_map(companies_df) if not companies_df.empty else {}
 
-# ================== СТАТУСИ КОРАБЛІВ (узгоджено з бекендом) ==================
+# ================== СТАТУСИ КОРАБЛІВ ==================
 SHIP_STATUS_OPTIONS = [
     ("docked",    "⚓ docked — у порту"),
     ("loading",   "⬆️ loading — завантажується"),
@@ -81,29 +82,32 @@ if not types_df.empty:
     elif "name" in types_df.columns:
         type_codes = types_df["name"].dropna().astype(str).tolist()
 
-# ================== ТАБИ ==================
-tab_list, tab_create, tab_update, tab_delete = st.tabs([
-    "📋 Список кораблів",
-    "➕ Створити корабель",
-    "🛠️ Оновити",
-    "❌ Видалити корабель",
-])
+# ================== STICKY TABS ==================
+tab = api.sticky_tabs(
+    ["📋 Список кораблів", "➕ Створити корабель", "🛠️ Оновити", "❌ Видалити корабель"],
+    "ships_main_tabs",
+)
 
-# ---------- 1. СПИСОК КОРАБЛІВ ----------
-with tab_list:
+# ---------- 1. СПИСОК ----------
+if tab == "📋 Список кораблів":
     st.subheader("📋 Всі кораблі")
 
     if ships_df.empty:
         st.info("Поки що немає жодного корабля.")
     else:
-        # Легкі фільтри
         f1, f2 = st.columns([2, 1])
-        q = f1.text_input("Пошук за назвою", placeholder="введіть частину назви")
+        q = f1.text_input("Пошук за назвою", placeholder="введіть частину назви", key="ships_search_q")
+
+        # Порожній дефолт фільтра статусів
+        if "ships_status_filter" not in st.session_state:
+            st.session_state["ships_status_filter"] = []
+
         status_filter = f2.multiselect(
             "Фільтр статусів",
             STATUS_VALUES,
-            default=STATUS_VALUES,
+            default=st.session_state["ships_status_filter"],
             format_func=status_format,
+            key="ships_status_filter",
         )
 
         view = ships_df.copy()
@@ -111,6 +115,7 @@ with tab_list:
         if q and "name" in view.columns:
             view = view[view["name"].astype(str).str.contains(q, case=False, na=False)]
 
+        # якщо порожньо — не фільтруємо
         if "status" in view.columns and status_filter:
             view = view[view["status"].isin(status_filter)]
 
@@ -137,10 +142,10 @@ with tab_list:
                 cols_order.append(col)
 
         view = view[cols_order]
-        st.dataframe(api.df_1based(view), width="stretch")
+        st.dataframe(api.df_1based(view), use_container_width=True)
 
-# ---------- 2. СТВОРИТИ КОРАБЕЛЬ ----------
-with tab_create:
+# ---------- 2. CREATE ----------
+elif tab == "➕ Створити корабель":
     st.subheader("➕ Створити новий корабель")
 
     if not port_ids:
@@ -149,34 +154,33 @@ with tab_create:
         with st.form("create_ship_form"):
             name = st.text_input("Назва корабля", placeholder="Mriya Sea")
 
-            # Тип корабля
             if type_codes:
-                ship_type = st.selectbox("Тип корабля", type_codes, index=0)
+                ship_type = st.selectbox("Тип корабля", type_codes, index=0, key="create_ship_type")
             else:
                 ship_type = st.text_input("Тип корабля (текстом)", value="cargo")
 
             country = st.text_input("Країна приписки", value="Ukraine")
 
-            # Порт (обов'язково реальний, без 0)
             selected_port_id = st.selectbox(
                 "Початкове розташування (порт)",
                 port_ids,
                 format_func=port_option_label,
+                key="create_ship_port",
             )
 
-            # Статус
             selected_status = st.selectbox(
                 "Початковий статус",
                 STATUS_VALUES,
                 format_func=status_format,
                 index=0,
+                key="create_ship_status",
             )
 
-            # Компанія-власник
             selected_company_id = st.selectbox(
                 "Компанія-власник",
                 company_ids,
                 format_func=company_option_label,
+                key="create_ship_company",
             )
 
             submitted = st.form_submit_button("Створити корабель")
@@ -199,8 +203,8 @@ with tab_create:
                         success_msg=f"Корабель '{name}' створено."
                     )
 
-# ---------- 3. ОНОВИТИ ----------
-with tab_update:
+# ---------- 3. UPDATE ----------
+elif tab == "🛠️ Оновити":
     st.subheader("🛠️ Оновити дані корабля")
 
     if ships_df.empty:
@@ -218,7 +222,7 @@ with tab_update:
         ship_row = ships_df[ships_df["id"] == selected_ship_id].iloc[0]
 
         with st.form("update_ship_form"):
-            # Порт (без 0)
+            # Порт
             if not port_ids:
                 st.warning("Немає портів у БД. Переміщення неможливе.")
                 new_port_id = safe_int(ship_row.get("port_id", 0))
@@ -233,7 +237,8 @@ with tab_update:
                     "Поточний/новий порт",
                     port_ids,
                     index=port_index,
-                    format_func=port_option_label
+                    format_func=port_option_label,
+                    key="update_ship_port",
                 )
 
             # Статус
@@ -245,6 +250,7 @@ with tab_update:
                 STATUS_VALUES,
                 index=status_index,
                 format_func=status_format,
+                key="update_ship_status",
             )
 
             # Компанія
@@ -257,13 +263,14 @@ with tab_update:
                 "Компанія-власник",
                 company_ids,
                 index=company_index,
-                format_func=company_option_label
+                format_func=company_option_label,
+                key="update_ship_company",
             )
 
             # Інші поля
-            new_name    = st.text_input("Назва корабля", value=str(ship_row.get("name", "")))
-            new_type    = st.text_input("Тип корабля", value=str(ship_row.get("type", "")))
-            new_country = st.text_input("Країна приписки", value=str(ship_row.get("country", "")))
+            new_name    = st.text_input("Назва корабля", value=str(ship_row.get("name", "")), key="update_ship_name")
+            new_type    = st.text_input("Тип корабля", value=str(ship_row.get("type", "")), key="update_ship_type")
+            new_country = st.text_input("Країна приписки", value=str(ship_row.get("country", "")), key="update_ship_country")
 
             if st.form_submit_button("Зберегти зміни"):
                 if not new_name:
@@ -283,8 +290,8 @@ with tab_update:
                         success_msg=f"Дані корабля '{new_name}' оновлено."
                     )
 
-# ---------- 4. ВИДАЛИТИ КОРАБЕЛЬ ----------
-with tab_delete:
+# ---------- 4. DELETE ----------
+elif tab == "❌ Видалити корабель":
     st.subheader("❌ Видалити корабель")
 
     if ships_df.empty:
@@ -307,7 +314,7 @@ with tab_delete:
             icon="⚠️",
         )
 
-        if st.button("❌ Підтвердити видалення", type="primary"):
+        if st.button("❌ Підтвердити видалення", type="primary", key="ship_delete_btn"):
             api.api_del(
                 f"/api/ships/{selected_ship_id}",
                 success_msg=f"Корабель '{ship_name}' видалено."

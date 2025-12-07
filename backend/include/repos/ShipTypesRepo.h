@@ -1,20 +1,22 @@
-﻿#pragma once
+﻿// include/repos/ShipTypesRepo.h
+#pragma once
 
-#include <cstdint>
+#include "models/ShipType.h"
+
 #include <optional>
 #include <string>
 #include <vector>
 
-#include "models/ShipType.h"
-
 class ShipTypesRepo {
 public:
-    using Id = std::int64_t;
-
     std::vector<ShipType> all();
-    std::optional<ShipType> byId(Id id);
+
+    std::optional<ShipType> byId(long long id);
     std::optional<ShipType> byCode(const std::string& code);
+
     ShipType create(const ShipType& t);
+
     void update(const ShipType& t);
-    void remove(Id id);
+
+    void remove(long long id);
 };

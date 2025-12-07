@@ -1,29 +1,35 @@
-﻿#pragma once
-
-#include <cstdint>
-#include <optional>
-#include <string>
-#include <vector>
+﻿// include/repos/CompaniesRepo.h
+#pragma once
 
 #include "models/Company.h"
 #include "models/Port.h"
 #include "models/Ship.h"
 
+#include <vector>
+#include <optional>
+#include <string>
+#include <cstdint>
+
 class CompaniesRepo {
 public:
-    using Id = std::int64_t;
-
+    // ---- CRUD companies ----
     std::vector<Company> all();
-    std::optional<Company> byId(Id id);
+    std::optional<Company> byId(std::int64_t id);
+
+    // старий API
     Company create(const std::string& name);
-    bool update(Id id, const std::string& name);
-    bool remove(Id id);
+    bool update(std::int64_t id, const std::string& name);
+    bool remove(std::int64_t id);
 
-    // офіси компанії
-    std::vector<Port> ports(Id companyId);
-    bool addPort(Id companyId, Id portId, bool isHq);
-    bool removePort(Id companyId, Id portId);
+    // ✅ новий API під тести
+    Company create(const Company& c);
+    bool update(const Company& c);
 
-    // кораблі компанії
-    std::vector<Ship> ships(Id companyId);
+    // ---- company ↔ ports ----
+    std::vector<Port> ports(std::int64_t companyId);
+    bool addPort(std::int64_t companyId, std::int64_t portId, bool isMain);
+    bool removePort(std::int64_t companyId, std::int64_t portId);
+
+    // ---- company ↔ ships ----
+    std::vector<Ship> ships(std::int64_t companyId);
 };

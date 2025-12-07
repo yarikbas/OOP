@@ -9,9 +9,10 @@
 
 namespace {
 
-void execOrThrow(sqlite3* db, const char* sql) {
+// Тепер приймає std::string і всередині викликає sqlite3_exec(sql.c_str())
+void execOrThrow(sqlite3* db, const std::string& sql) {
     char* err = nullptr;
-    const int rc = sqlite3_exec(db, sql, nullptr, nullptr, &err);
+    const int rc = sqlite3_exec(db, sql.c_str(), nullptr, nullptr, &err);
     if (rc != SQLITE_OK) {
         std::string msg = err ? err : sqlite3_errmsg(db);
         if (err) sqlite3_free(err);
@@ -19,9 +20,10 @@ void execOrThrow(sqlite3* db, const char* sql) {
     }
 }
 
-int scalarInt(sqlite3* db, const char* sql) {
+// Аналогічно – працюємо з std::string
+int scalarInt(sqlite3* db, const std::string& sql) {
     sqlite3_stmt* st = nullptr;
-    if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
+    if (sqlite3_prepare_v2(db, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) {
         throw std::runtime_error(sqlite3_errmsg(db));
     }
 
@@ -33,9 +35,10 @@ int scalarInt(sqlite3* db, const char* sql) {
     return value;
 }
 
-bool columnExists(sqlite3* db, const char* table, const char* column) {
+// І тут table/column – std::string
+bool columnExists(sqlite3* db, const std::string& table, const std::string& column) {
     sqlite3_stmt* st = nullptr;
-    const std::string sql = std::string("PRAGMA table_info(") + table + ");";
+    const std::string sql = "PRAGMA table_info(" + table + ");";
 
     if (sqlite3_prepare_v2(db, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) {
         throw std::runtime_error(sqlite3_errmsg(db));
@@ -54,10 +57,17 @@ bool columnExists(sqlite3* db, const char* table, const char* column) {
     return found;
 }
 
-
-void ensureColumn(sqlite3* db, const std::string& table, const std::string& column, const std::string& declaration) {
+// Тут код не міняється логічно – просто виклики тепер йдуть на string-версії
+void ensureColumn(sqlite3* db,
+                  const std::string& table,
+                  const std::string& column,
+                  const std::string& declaration) {
     if (!columnExists(db, table, column)) {
-        execOrThrow(db, "ALTER TABLE " + table + " ADD COLUMN " + column + " " + declaration + ";");
+        const std::string sql =
+            "ALTER TABLE " + table +
+            " ADD COLUMN " + column +
+            " " + declaration + ";";
+        execOrThrow(db, sql);
     }
 }
 
@@ -210,7 +220,6 @@ void Db::runMigrations() {
     ensureColumn(db_, "ships", "status", "TEXT NOT NULL DEFAULT 'docked'");
     ensureColumn(db_, "ships", "company_id", "INTEGER");
     execOrThrow(db_, "CREATE INDEX IF NOT EXISTS idx_ships_company ON ships(company_id);");
-
 
     // --- COMPANY_PORTS ---
     execOrThrow(db_,

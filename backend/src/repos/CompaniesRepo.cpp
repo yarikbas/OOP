@@ -1,4 +1,5 @@
-﻿#include "repos/CompaniesRepo.h"
+﻿// src/repos/CompaniesRepo.cpp
+#include "repos/CompaniesRepo.h"
 #include "db/Db.h"
 
 #include <sqlite3.h>
@@ -130,6 +131,11 @@ Company CompaniesRepo::create(const std::string& name) {
     return *c;
 }
 
+// ✅ overload під тести
+Company CompaniesRepo::create(const Company& c) {
+    return create(c.name);
+}
+
 bool CompaniesRepo::update(std::int64_t id, const std::string& name) {
     sqlite3* db = Db::instance().handle();
 
@@ -145,6 +151,11 @@ bool CompaniesRepo::update(std::int64_t id, const std::string& name) {
     } catch (...) {
         return false; // зберігаємо стару семантику bool-методу
     }
+}
+
+// ✅ overload під тести
+bool CompaniesRepo::update(const Company& c) {
+    return update(c.id, c.name);
 }
 
 bool CompaniesRepo::remove(std::int64_t id) {

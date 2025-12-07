@@ -1,26 +1,30 @@
-﻿#pragma once
+﻿// include/repos/PortsRepo.h
+#pragma once
 
+#include "models/Port.h"
+
+#include <sqlite3.h>
 #include <cstdint>
 #include <optional>
 #include <vector>
 
-#include "models/Port.h"
-
-// forward declaration, щоб не тягнути sqlite3.h сюди
-struct sqlite3;
-
 class PortsRepo {
 public:
-    using Id = std::int64_t;
-
+    // За замовчуванням бере Db::instance().handle()
     PortsRepo();
+
+    // Для тестів/DI можна передати явний sqlite3*
     explicit PortsRepo(sqlite3* db);
 
     std::vector<Port> all() const;
-    Port create(const Port& p) const;
-    std::optional<Port> getById(Id id) const;
+
+    Port create(const Port& in) const;
+
+    std::optional<Port> getById(std::int64_t id) const;
+
     bool update(const Port& p) const;
-    bool remove(Id id) const;
+
+    bool remove(std::int64_t id) const;
 
 private:
     sqlite3* db_{nullptr};

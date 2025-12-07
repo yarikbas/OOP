@@ -1,4 +1,5 @@
-﻿#include "repos/CrewRepo.h"
+﻿// src/repos/CrewRepo.cpp
+#include "repos/CrewRepo.h"
 #include "db/Db.h"
 
 #include <sqlite3.h>
@@ -125,6 +126,56 @@ std::optional<CrewAssignment> CrewRepo::assign(long long personId,
     } catch (const std::runtime_error&) {
         // даємо контролеру вирішити 500
         throw;
+    }
+}
+
+// ✅ НОВЕ: завершити призначення за id поточним часом SQLite
+bool CrewRepo::end(long long assignmentId) {
+    sqlite3* db = Db::instance().handle();
+
+    const char* sql =
+        "UPDATE crew_assignments "
+        "SET end_utc = datetime('now') "
+        "WHERE id = ? AND end_utc IS NULL";
+
+    try {
+        Stmt st(db, sql);
+        sqlite3_bind_int64(st.get(), 1, static_cast<std::int64_t>(assignmentId));
+
+        const int rc = sqlite3_step(st.get());
+        if (rc != SQLITE_DONE) {
+            return false;
+        }
+
+        return sqlite3_changes(db) > 0;
+    } catch (...) {
+        return false;
+    }
+}
+
+// ✅ НОВЕ: завершити призначення за id з явним endUtc
+bool CrewRepo::end(long long assignmentId, const std::string& endUtc) {
+    sqlite3* db = Db::instance().handle();
+
+    const char* sql =
+        "UPDATE crew_assignments "
+        "SET end_utc = ? "
+        "WHERE id = ? AND end_utc IS NULL";
+
+    try {
+        Stmt st(db, sql);
+
+        sqlite3_bind_text (st.get(), 1, endUtc.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(st.get(), 2, static_cast<std::int64_t>(assignmentId));
+
+        const int rc = sqlite3_step(st.get());
+        if (rc != SQLITE_DONE) {
+            return false;
+        }
+
+        return sqlite3_changes(db) > 0;
+    } catch (...) {
+        return false;
     }
 }
 

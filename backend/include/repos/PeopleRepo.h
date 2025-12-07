@@ -1,18 +1,17 @@
-﻿#pragma once
-
-#include <cstdint>
-#include <optional>
-#include <vector>
+﻿// include/repos/PeopleRepo.h
+#pragma once
 
 #include "models/Person.h"
 
+#include <optional>
+#include <vector>
+
 class PeopleRepo {
 public:
-    using Id = std::int64_t;
-
     std::vector<Person> all();
-    std::optional<Person> byId(Id id);
+    std::optional<Person> byId(long long id);
+
     Person create(const Person& p);
     void update(const Person& p);
-    void remove(Id id);
+    void remove(long long id);
 };

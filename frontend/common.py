@@ -1,7 +1,13 @@
+# frontend/common.py
+from __future__ import annotations
+
 import os
+from typing import Any
+
 import streamlit as st
 import requests
 import pandas as pd
+
 
 # ================== КОНФІГ ==================
 BASE_URL = os.getenv("FLEET_BASE_URL", "http://127.0.0.1:8082")
@@ -9,10 +15,24 @@ BASE_URL = os.getenv("FLEET_BASE_URL", "http://127.0.0.1:8082")
 # Реюз TCP-з'єднань
 _SESSION = requests.Session()
 
-# TTL можна централізувати
+# TTL централізовано
 TTL_SHORT = 3
 TTL_MED = 5
 TTL_LONG = 15
+
+
+# ================== DATAFRAME HELPERS ==================
+def df_1based(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Повертає копію DataFrame з індексом, що починається з 1.
+    Використовуємо перед st.dataframe, щоб рядки нумерувалися 1,2,3...
+    """
+    if df is None or df.empty:
+        return df
+    df = df.copy()
+    df.index = range(1, len(df) + 1)
+    df.index.name = "#"
+    return df
 
 
 # ================== КЕШ / ОЧИЩЕННЯ ==================
@@ -42,25 +62,16 @@ def clear_all_caches():
         get_active_assignments,
     ]:
         try:
-            fn.clear()
+            fn.clear()  # type: ignore[attr-defined]
         except Exception:
             continue
 
 
-def df_1based(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Повертає копію DataFrame з індексом, що починається з 1.
-    Використовуємо перед st.dataframe, щоб рядки нумерувалися 1,2,3...
-    """
-    if df is None or df.empty:
-        return df
-    df = df.copy()
-    df.index = range(1, len(df) + 1)
-    df.index.name = "#"
-    return df
-
-
 # ================== API ХЕЛПЕРИ (CRUD) ==================
+def _url(path: str) -> str:
+    return BASE_URL + path
+
+
 def _handle_api_error(resp: requests.Response, action: str):
     """Внутрішній хелпер для обробки помилок API."""
     try:
@@ -84,10 +95,6 @@ def _after_success(success_msg: str, rerun: bool = True):
     st.session_state["last_success"] = success_msg
     if rerun:
         st.rerun()
-
-
-def _url(path: str) -> str:
-    return BASE_URL + path
 
 
 def api_get(path: str, *, expect_json: bool = True):
@@ -116,8 +123,6 @@ def api_post(path: str, payload: dict, success_msg: str, rerun: bool = True):
         return _handle_api_error(resp, "Create")
 
     data = resp.json() if resp.text else None
-
-    # Якщо rerun=True, повернення практично не використовується
     _after_success(success_msg, rerun=rerun)
     return data
 
@@ -192,19 +197,19 @@ def get_company_ports(company_id: int) -> pd.DataFrame:
     return pd.DataFrame(data)
 
 
-# ================== АКТИВНІ ПРИЗНАЧЕННЯ (оптимізація N+1 логіки) ==================
+# ================== АКТИВНІ ПРИЗНАЧЕННЯ ==================
 @st.cache_data(ttl=TTL_SHORT)
 def get_active_assignments() -> pd.DataFrame:
     """
     Повертає DataFrame активних призначень з колонками:
-    person_id, ship_id, id, start_utc, end_utc (якщо є).
+    person_id, ship_id, ...
     Будуємо 1 раз і використовуємо в кількох місцях.
     """
     ships_df = get_ships()
     if ships_df.empty or "id" not in ships_df.columns:
         return pd.DataFrame(columns=["person_id", "ship_id"])
 
-    rows = []
+    rows: list[pd.DataFrame] = []
     for ship_id in ships_df["id"].dropna().astype(int).tolist():
         try:
             crew_df = get_ship_crew(ship_id)
@@ -214,14 +219,14 @@ def get_active_assignments() -> pd.DataFrame:
         if crew_df.empty or "person_id" not in crew_df.columns:
             continue
 
-        # активні: end_utc == null
+        # активні: end_utc == null (якщо колонка є)
         if "end_utc" in crew_df.columns:
             crew_df = crew_df[crew_df["end_utc"].isna()].copy()
 
         if crew_df.empty:
             continue
 
-        crew_df["ship_id"] = ship_id
+        crew_df["ship_id"] = int(ship_id)
         rows.append(crew_df)
 
     if not rows:
@@ -230,8 +235,7 @@ def get_active_assignments() -> pd.DataFrame:
     merged = pd.concat(rows, ignore_index=True)
 
     # Гарантуємо потрібні колонки
-    needed = ["person_id", "ship_id"]
-    for col in needed:
+    for col in ["person_id", "ship_id"]:
         if col not in merged.columns:
             merged[col] = pd.Series(dtype="int64")
 
@@ -245,12 +249,13 @@ def get_all_active_person_ids() -> set[int]:
     if df.empty or "person_id" not in df.columns:
         return set()
 
-    return set(
-        df["person_id"]
-        .dropna()
-        .astype(int, errors="ignore")
-        .tolist()
-    )
+    ids: list[int] = []
+    for v in df["person_id"].dropna().tolist():
+        try:
+            ids.append(int(v))
+        except Exception:
+            continue
+    return set(ids)
 
 
 @st.cache_data(ttl=TTL_SHORT)
@@ -280,32 +285,96 @@ def get_name_map(df: pd.DataFrame, id_col: str = "id", name_col: str = "name") -
     """Створює словник {id: name} з DataFrame."""
     if df.empty or id_col not in df.columns or name_col not in df.columns:
         return {}
-    return pd.Series(df[name_col].values, index=df[id_col]).to_dict()
+    try:
+        return pd.Series(df[name_col].values, index=df[id_col]).to_dict()
+    except Exception:
+        return {}
 
 
-def get_ship_name_map() -> dict:
+def get_ship_name_map() -> dict[int, str]:
     ships = get_ships()
     if ships.empty or "id" not in ships.columns:
         return {}
 
-    def make_label(row):
+    def make_label(row: pd.Series) -> str:
         name = row.get("name", "")
         sid = row.get("id", "")
         stype = row.get("type", "")
         return f"{name} (id={sid}, type={stype})"
 
-    return {row["id"]: make_label(row) for _, row in ships.iterrows()}
+    out: dict[int, str] = {}
+    for _, row in ships.iterrows():
+        try:
+            sid = int(row["id"])
+            out[sid] = make_label(row)
+        except Exception:
+            continue
+    return out
 
 
-def get_person_name_map() -> dict:
+def get_person_name_map() -> dict[int, str]:
     people = get_people()
     if people.empty or "id" not in people.columns:
         return {}
 
-    def make_label(row):
+    def make_label(row: pd.Series) -> str:
         name = row.get("full_name", "")
         pid = row.get("id", "")
         rank = row.get("rank", "")
         return f"{name} (id={pid}, rank={rank})"
 
-    return {row["id"]: make_label(row) for _, row in people.iterrows()}
+    out: dict[int, str] = {}
+    for _, row in people.iterrows():
+        try:
+            pid = int(row["id"])
+            out[pid] = make_label(row)
+        except Exception:
+            continue
+    return out
+
+
+# ================== STICKY TABS ==================
+def sticky_tabs(labels: list[str], key: str, default: int = 0) -> str:
+    """
+    Липкі вкладки-радіо, які:
+    - НЕ скидаються при selectbox/checkbox
+    - НЕ ламають session_state
+    - переживають rerun
+
+    Повертає назву активної вкладки.
+
+    Використання:
+        tab = api.sticky_tabs(["A", "B", "C"], "unique_key")
+        if tab == "A":
+            ...
+    """
+    if not labels:
+        return ""
+
+    state_key = f"sticky_tab::{key}"
+
+    # Ініціалізуємо ДО створення віджета
+    if state_key not in st.session_state:
+        if 0 <= default < len(labels):
+            st.session_state[state_key] = labels[default]
+        else:
+            st.session_state[state_key] = labels[0]
+
+    current = st.session_state.get(state_key, labels[0])
+    if current not in labels:
+        current = labels[0]
+
+    idx = labels.index(current)
+
+    # key віджета = state_key
+    # Streamlit сам оновить st.session_state[state_key]
+    choice = st.radio(
+        label="",
+        options=labels,
+        index=idx,
+        horizontal=True,
+        key=state_key,
+        label_visibility="collapsed",
+    )
+
+    return choice

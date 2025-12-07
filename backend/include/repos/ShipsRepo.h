@@ -1,20 +1,28 @@
-﻿#pragma once
-
-#include <cstdint>
-#include <optional>
-#include <vector>
+﻿// include/repos/ShipsRepo.h
+#pragma once
 
 #include "models/Ship.h"
 
+#include <optional>
+#include <vector>
+
 class ShipsRepo {
 public:
-    using Id = std::int64_t;
-
+    // Отримати всі кораблі
     std::vector<Ship> all();
-    std::vector<Ship> getByPortId(Id portId);
 
-    Ship create(const Ship& s);
-    std::optional<Ship> byId(Id id);
+    // Отримати кораблі за портом
+    std::vector<Ship> getByPortId(long long portId);
+
+    // Отримати корабель за id
+    std::optional<Ship> byId(long long id);
+
+    // Створити корабель
+    Ship create(const Ship& sIn);
+
+    // Оновити корабель
     void update(const Ship& s);
-    void remove(Id id);
+
+    // Видалити корабель
+    void remove(long long id);
 };

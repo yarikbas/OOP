@@ -20,7 +20,9 @@ add_library(oop_core STATIC
     src/repos/CrewRepo.cpp
 )
 
-target_include_directories(oop_core PUBLIC include)
+target_include_directories(oop_core PUBLIC
+    ${PROJECT_SOURCE_DIR}/include
+)
 
 target_link_libraries(oop_core PUBLIC
     unofficial::sqlite3::sqlite3
@@ -38,7 +40,9 @@ add_executable(oop_backend
     src/controllers/CrewController.cpp
 )
 
-target_include_directories(oop_backend PRIVATE include)
+target_include_directories(oop_backend PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+)
 
 target_link_libraries(oop_backend PRIVATE
     Drogon::Drogon
@@ -60,7 +64,11 @@ if(BUILD_TESTING)
         tests/CrewRepoTests.cpp
     )
 
-    target_include_directories(oop_tests PRIVATE include)
+    target_include_directories(oop_tests PRIVATE
+        ${PROJECT_SOURCE_DIR}
+        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/tests
+    )
 
     target_link_libraries(oop_tests PRIVATE
         oop_core

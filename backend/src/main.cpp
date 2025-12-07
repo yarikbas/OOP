@@ -5,14 +5,13 @@
 
 int main() {
     try {
-        // ініціалізація БД + міграції
-        Db::instance().runMigrations();
+        // ініціалізація БД (всередині Db() вже є runMigrations)
+        Db::instance();
     } catch (const std::exception& e) {
         std::cerr << "[Db] init failed: " << e.what() << std::endl;
         return 3;
     }
 
-    // health endpoint
     drogon::app().registerHandler(
         "/health",
         [](const drogon::HttpRequestPtr&,
