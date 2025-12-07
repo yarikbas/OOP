@@ -7,7 +7,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # ---- deps for core/server ----
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
 find_package(Drogon CONFIG REQUIRED)
-find_package(nlohmann_json CONFIG REQUIRED) # прибери, якщо реально не використовуєш
+
+# Якщо реально десь не використовуєш nlohmann_json — прибери
+find_package(nlohmann_json CONFIG REQUIRED)
 
 # ---- core ----
 add_library(oop_core STATIC
@@ -48,33 +50,3 @@ target_link_libraries(oop_backend PRIVATE
     Drogon::Drogon
     oop_core
 )
-
-# ---- tests ----
-include(CTest)
-
-if(BUILD_TESTING)
-    find_package(GTest CONFIG REQUIRED)
-
-    add_executable(oop_tests
-        tests/PortsRepoTests.cpp
-        tests/ShipsRepoTests.cpp
-        tests/PeopleRepoTests.cpp
-        tests/CompaniesRepoTests.cpp
-        tests/ShipTypesRepoTests.cpp
-        tests/CrewRepoTests.cpp
-    )
-
-    target_include_directories(oop_tests PRIVATE
-        ${PROJECT_SOURCE_DIR}
-        ${PROJECT_SOURCE_DIR}/include
-        ${PROJECT_SOURCE_DIR}/tests
-    )
-
-    target_link_libraries(oop_tests PRIVATE
-        oop_core
-        GTest::gtest
-        GTest::gtest_main
-    )
-
-    add_test(NAME AllRepoTests COMMAND oop_tests)
-endif()

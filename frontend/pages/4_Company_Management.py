@@ -7,9 +7,24 @@ import common as api
 st.set_page_config(page_title="Company Management", page_icon="🏢", layout="wide")
 st.title("🏢 Company Management")
 
+
+# ================== UI HELPERS ==================
+def df_stretch(df: pd.DataFrame, **kwargs):
+    """
+    Сумісне відображення таблиць для нових/старих версій Streamlit.
+    Новий API: width="stretch"
+    Старий API: use_container_width=True
+    """
+    try:
+        st.dataframe(df, width="stretch", **kwargs)
+    except TypeError:
+        st.dataframe(df, width="stretch", **kwargs)
+
+
 # Flash
 if "last_success" in st.session_state:
     st.success(st.session_state.pop("last_success"))
+
 
 # ================== LOAD BASE DATA ==================
 try:
@@ -31,11 +46,13 @@ def safe_int(x, default=0):
     except Exception:
         return default
 
+
 # ================== STICKY MAIN TABS ==================
 tab = api.sticky_tabs(
     ["🏢 Компанії", "⚓ Компанія–Порт", "🚢 Компанія–Кораблі"],
     "company_main_tabs",
 )
+
 
 # =========================================================
 # TAB 1: Companies CRUD
@@ -52,7 +69,8 @@ if tab == "🏢 Компанії":
             show_cols = [c for c in ["id", "name"] if c in companies_df.columns]
             if not show_cols:
                 show_cols = list(companies_df.columns)
-            st.dataframe(api.df_1based(companies_df[show_cols]), use_container_width=True)
+
+            df_stretch(api.df_1based(companies_df[show_cols]))
 
     with col_right:
         st.markdown("### ➕ Додати компанію")
@@ -111,6 +129,7 @@ if tab == "🏢 Компанії":
                     f"/api/companies/{int(del_id)}",
                     success_msg="Компанію видалено."
                 )
+
 
 # =========================================================
 # TAB 2: Company–Port links
@@ -188,11 +207,13 @@ elif tab == "⚓ Компанія–Порт":
                 if "port_id" in view_df.columns:
                     view_df["port_name"] = view_df["port_id"].map(port_map)
 
-                st.caption("ℹ️ Якщо бекенд ще не повертає прапорець головного порту — "
-                           "цей список показує лише прив'язані порти.")
+                st.caption(
+                    "ℹ️ Якщо бекенд ще не повертає прапорець головного порту — "
+                    "цей список показує лише прив'язані порти."
+                )
 
                 show_cols = [c for c in ["port_id", "port_name"] if c in view_df.columns]
-                st.dataframe(api.df_1based(view_df[show_cols]), use_container_width=True)
+                df_stretch(api.df_1based(view_df[show_cols]))
 
                 st.markdown("#### ⭐ Зробити головним портом")
 
@@ -228,6 +249,7 @@ elif tab == "⚓ Компанія–Порт":
                         success_msg="Порт відв'язано від компанії.",
                     )
 
+
 # =========================================================
 # TAB 3: Company–Ships (view)
 # =========================================================
@@ -258,7 +280,10 @@ elif tab == "🚢 Компанія–Кораблі":
             if company_ships.empty:
                 st.info("У цієї компанії поки немає кораблів.")
             else:
-                show_cols = [c for c in ["id", "name", "type", "country", "port_id", "status", "company_id"] if c in company_ships.columns]
-                st.dataframe(api.df_1based(company_ships[show_cols]), use_container_width=True)
+                show_cols = [
+                    c for c in ["id", "name", "type", "country", "port_id", "status", "company_id"]
+                    if c in company_ships.columns
+                ]
+                df_stretch(api.df_1based(company_ships[show_cols]))
 
     st.caption("💡 Прив’язку корабля до компанії ти вже можеш робити через форму Update на сторінці Ships.")

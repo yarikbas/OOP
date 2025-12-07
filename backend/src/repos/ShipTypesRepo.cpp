@@ -119,12 +119,13 @@ ShipType ShipTypesRepo::create(const ShipType& t) {
     sqlite3_bind_text(st.get(), 3, t.description.c_str(), -1, SQLITE_TRANSIENT);
 
     if (sqlite3_step(st.get()) != SQLITE_DONE) {
-        throw std::runtime_error(std::string("insert failed: ") + sqlite3_errmsg(db));
+        throw std::runtime_error(std::string("ShipTypesRepo::create failed: ")
+                                 + sqlite3_errmsg(db));
     }
 
     const auto id = sqlite3_last_insert_rowid(db);
     auto got = byId(id);
-    if (!got) throw std::runtime_error("insert ok but fetch failed");
+    if (!got) throw std::runtime_error("ShipTypesRepo::create ok but fetch failed");
     return *got;
 }
 
@@ -144,7 +145,8 @@ void ShipTypesRepo::update(const ShipType& t) {
     sqlite3_bind_int64(st.get(), 4, static_cast<std::int64_t>(t.id));
 
     if (sqlite3_step(st.get()) != SQLITE_DONE) {
-        throw std::runtime_error(std::string("update failed: ") + sqlite3_errmsg(db));
+        throw std::runtime_error(std::string("ShipTypesRepo::update failed: ")
+                                 + sqlite3_errmsg(db));
     }
 }
 
@@ -159,6 +161,7 @@ void ShipTypesRepo::remove(long long id) {
     sqlite3_bind_int64(st.get(), 1, static_cast<std::int64_t>(id));
 
     if (sqlite3_step(st.get()) != SQLITE_DONE) {
-        throw std::runtime_error(std::string("delete failed: ") + sqlite3_errmsg(db));
+        throw std::runtime_error(std::string("ShipTypesRepo::remove failed: ")
+                                 + sqlite3_errmsg(db));
     }
 }

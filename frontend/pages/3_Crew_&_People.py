@@ -8,42 +8,75 @@ from datetime import datetime, timezone
 st.set_page_config(page_title="Crew & People", page_icon="🧑‍✈️", layout="wide")
 st.title("🧑‍✈️ Управління Екіпажем та Персоналом")
 
+
+# ================== UI HELPERS ==================
+def df_stretch(df: pd.DataFrame, **kwargs):
+    """
+    Сумісне відображення таблиць для нових/старих версій Streamlit.
+    Новий API: width="stretch"
+    Старий API: use_container_width=True
+    """
+    try:
+        st.dataframe(df, width="stretch", **kwargs)
+    except TypeError:
+        st.dataframe(df, width="stretch", **kwargs)
+
+
 # ============================================================
 # Бекенд перевіряє rank українськими рядками.
 # UI зберігає в БД саме LABEL.
+#
+# Домовленість:
+# "Солдат" == "Військовий" (синоніми).
+# У UI використовуємо "Військовий" як основний термін.
 # ============================================================
 PROFESSIONS = [
     ("Captain",    "Капітан"),
     ("Engineer",   "Інженер"),
-    ("Soldier",    "Солдат"),
+    ("Military",   "Військовий"),
     ("Researcher", "Дослідник"),
 ]
+
 LABEL_BY_CODE = {code: label for code, label in PROFESSIONS}
 CODE_BY_LABEL = {label: code for code, label in PROFESSIONS}
 PROF_LABELS = [label for _, label in PROFESSIONS]
 
+# legacy/синоніми з БД -> канонічний лейбл для UI
+LEGACY_TO_LABEL = {
+    "Солдат": "Військовий",
+    "Soldier": "Військовий",
+}
+
 def rank_to_db(label: str) -> str:
+    # В БД кладемо саме український LABEL
     return label
 
 def rank_to_ui_label(raw_rank: str) -> str:
     if not raw_rank:
         return ""
+    # якщо раптом прийшов код
     if raw_rank in LABEL_BY_CODE:
         return LABEL_BY_CODE[raw_rank]
+    # якщо прийшов legacy-термін
+    if raw_rank in LEGACY_TO_LABEL:
+        return LEGACY_TO_LABEL[raw_rank]
     return raw_rank
 
 def default_prof_index_from_db_rank(raw_rank: str) -> int:
     if not raw_rank:
         return 0
     label = LABEL_BY_CODE.get(raw_rank, raw_rank)
+    label = LEGACY_TO_LABEL.get(label, label)
     try:
         return PROF_LABELS.index(label)
     except ValueError:
         return 0
 
+
 # Flash
 if "last_success" in st.session_state:
     st.success(st.session_state.pop("last_success"))
+
 
 # ================== LOAD ==================
 try:
@@ -55,11 +88,13 @@ except Exception as e:
     st.error(f"Не вдалося завантажити довідники: {e}")
     st.stop()
 
+
 # ================== STICKY MAIN TABS ==================
 tab = api.sticky_tabs(
     ["⚓ Управління Екіпажами", "👤 Управління Персоналом (CRUD)"],
     "crew_people_main_tabs",
 )
+
 
 # ============================================================
 #               УПРАВЛІННЯ ЕКІПАЖАМИ
@@ -178,11 +213,11 @@ if tab == "⚓ Управління Екіпажами":
                         lambda r: rank_to_ui_label(str(r))
                     )
 
-                st.dataframe(
+                df_stretch(
                     api.df_1based(crew_df_current),
-                    use_container_width=True,
                     height=400,
                 )
+
 
 # ============================================================
 #           УПРАВЛІННЯ ПЕРСОНАЛОМ (CRUD)
@@ -230,7 +265,7 @@ elif tab == "👤 Управління Персоналом (CRUD)":
 
             people_view = people_view[cols_order]
 
-        st.dataframe(api.df_1based(people_view), use_container_width=True)
+        df_stretch(api.df_1based(people_view))
 
     # ---------- Створити ----------
     elif people_tab == "➕ Створити":

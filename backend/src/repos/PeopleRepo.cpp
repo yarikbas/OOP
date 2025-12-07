@@ -1,149 +1,148 @@
-﻿// src/repos/PeopleRepo.cpp
-#include "repos/PeopleRepo.h"
+﻿#include "repos/PeopleRepo.h"
 #include "db/Db.h"
-
 #include <sqlite3.h>
-
-#include <cstdint>
-#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace {
-
-// ---------- RAII wrapper for sqlite3_stmt ----------
-class Stmt {
-public:
-    Stmt(sqlite3* db, const char* sql) : db_(db) {
-        if (sqlite3_prepare_v2(db_, sql, -1, &st_, nullptr) != SQLITE_OK) {
-            throw std::runtime_error(sqlite3_errmsg(db_));
-        }
+    // Допоміжна функція для безпечного читання тексту
+    std::string safe_text(sqlite3_stmt* st, int col) {
+        const unsigned char* t = sqlite3_column_text(st, col);
+        return t ? reinterpret_cast<const char*>(t) : "";
     }
-
-    ~Stmt() {
-        if (st_) sqlite3_finalize(st_);
-    }
-
-    sqlite3_stmt* get() const noexcept { return st_; }
-
-    Stmt(const Stmt&) = delete;
-    Stmt& operator=(const Stmt&) = delete;
-
-private:
-    sqlite3* db_{nullptr};
-    sqlite3_stmt* st_{nullptr};
-};
-
-inline std::string safe_text(sqlite3_stmt* st, int col) {
-    const unsigned char* t = sqlite3_column_text(st, col);
-    return t ? reinterpret_cast<const char*>(t) : "";
 }
 
-Person parsePerson(sqlite3_stmt* st) {
-    Person p{};
-    p.id        = sqlite3_column_int64(st, 0);
-    p.full_name = safe_text(st, 1);
-    p.rank      = safe_text(st, 2);
-    p.active    = sqlite3_column_int(st, 3);
-    return p;
+void PeopleRepo::createTable() {
+    sqlite3* db = Db::instance().handle();
+    const char* sql =
+        "CREATE TABLE IF NOT EXISTS people ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  full_name TEXT NOT NULL,"
+        "  rank TEXT NOT NULL"
+        ");";
+
+    char* errMsg = nullptr;
+    if (sqlite3_exec(db, sql, nullptr, nullptr, &errMsg) != SQLITE_OK) {
+        std::string msg = errMsg;
+        sqlite3_free(errMsg);
+        throw std::runtime_error("PeopleRepo::createTable failed: " + msg);
+    }
 }
 
-} // namespace
+Person PeopleRepo::create(const Person& p) {
+    sqlite3* db = Db::instance().handle();
+    const char* sql = "INSERT INTO people(full_name, rank) VALUES(?, ?);";
+
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
+        throw std::runtime_error(sqlite3_errmsg(db));
+    }
+
+    // Прив'язуємо параметри
+    sqlite3_bind_text(st, 1, p.full_name.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, p.rank.c_str(), -1, SQLITE_TRANSIENT);
+
+    if (sqlite3_step(st) != SQLITE_DONE) {
+        sqlite3_finalize(st);
+        throw std::runtime_error("PeopleRepo::create step failed: " + std::string(sqlite3_errmsg(db)));
+    }
+    sqlite3_finalize(st);
+
+    Person created = p;
+    created.id = sqlite3_last_insert_rowid(db);
+    return created;
+}
 
 std::vector<Person> PeopleRepo::all() {
     std::vector<Person> out;
     sqlite3* db = Db::instance().handle();
+    const char* sql = "SELECT id, full_name, rank FROM people;";
 
-    const char* sql =
-        "SELECT id, full_name, rank, active "
-        "FROM people "
-        "ORDER BY id";
-
-    Stmt st(db, sql);
-
-    while (sqlite3_step(st.get()) == SQLITE_ROW) {
-        out.push_back(parsePerson(st.get()));
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
+        throw std::runtime_error(sqlite3_errmsg(db));
     }
 
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        Person p;
+        p.id        = sqlite3_column_int64(st, 0);
+        p.full_name = safe_text(st, 1);
+        p.rank      = safe_text(st, 2);
+        out.push_back(p);
+    }
+    sqlite3_finalize(st);
     return out;
 }
 
 std::optional<Person> PeopleRepo::byId(long long id) {
     sqlite3* db = Db::instance().handle();
+    const char* sql = "SELECT id, full_name, rank FROM people WHERE id = ?;";
 
-    const char* sql =
-        "SELECT id, full_name, rank, active "
-        "FROM people "
-        "WHERE id=?";
-
-    Stmt st(db, sql);
-    sqlite3_bind_int64(st.get(), 1, static_cast<std::int64_t>(id));
-
-    if (sqlite3_step(st.get()) == SQLITE_ROW) {
-        return parsePerson(st.get());
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
+        throw std::runtime_error(sqlite3_errmsg(db));
     }
 
+    sqlite3_bind_int64(st, 1, id);
+
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        Person p;
+        p.id        = sqlite3_column_int64(st, 0);
+        p.full_name = safe_text(st, 1);
+        p.rank      = safe_text(st, 2);
+        sqlite3_finalize(st);
+        return p;
+    }
+
+    sqlite3_finalize(st);
     return std::nullopt;
-}
-
-Person PeopleRepo::create(const Person& p) {
-    sqlite3* db = Db::instance().handle();
-
-    const char* sql =
-        "INSERT INTO people(full_name, rank, active) "
-        "VALUES (?,?,?)";
-
-    Stmt st(db, sql);
-
-    sqlite3_bind_text(st.get(), 1, p.full_name.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(st.get(), 2, p.rank.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int (st.get(), 3, p.active);
-
-    if (sqlite3_step(st.get()) != SQLITE_DONE) {
-        throw std::runtime_error(std::string("insert failed: ") + sqlite3_errmsg(db));
-    }
-
-    const auto newId = sqlite3_last_insert_rowid(db);
-    auto got = byId(newId);
-    if (!got) throw std::runtime_error("insert ok but fetch failed");
-    return *got;
 }
 
 void PeopleRepo::update(const Person& p) {
     sqlite3* db = Db::instance().handle();
+    const char* sql = "UPDATE people SET full_name=?, rank=? WHERE id=?;";
 
-    const char* sql =
-        "UPDATE people "
-        "SET full_name=?, rank=?, active=? "
-        "WHERE id=?";
-
-    Stmt st(db, sql);
-
-    sqlite3_bind_text (st.get(), 1, p.full_name.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text (st.get(), 2, p.rank.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int  (st.get(), 3, p.active);
-    sqlite3_bind_int64(st.get(), 4, static_cast<std::int64_t>(p.id));
-
-    if (sqlite3_step(st.get()) != SQLITE_DONE) {
-        throw std::runtime_error(std::string("update failed: ") + sqlite3_errmsg(db));
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
+        throw std::runtime_error(sqlite3_errmsg(db));
     }
+
+    sqlite3_bind_text(st, 1, p.full_name.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, p.rank.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 3, p.id);
+
+    if (sqlite3_step(st) != SQLITE_DONE) {
+        sqlite3_finalize(st);
+        throw std::runtime_error("PeopleRepo::update failed: " + std::string(sqlite3_errmsg(db)));
+    }
+    sqlite3_finalize(st);
 }
 
 void PeopleRepo::remove(long long id) {
     sqlite3* db = Db::instance().handle();
-
-    const char* sql =
-        "DELETE FROM people "
-        "WHERE id=?";
-
-    Stmt st(db, sql);
-    sqlite3_bind_int64(st.get(), 1, static_cast<std::int64_t>(id));
-
-    if (sqlite3_step(st.get()) != SQLITE_DONE) {
-        throw std::runtime_error(std::string("delete failed: ") + sqlite3_errmsg(db));
+    
+    // 1. Видаляємо залежності (екіпаж)
+    const char* delCrewSql = "DELETE FROM crew_assignments WHERE person_id = ?;";
+    sqlite3_stmt* stCrew = nullptr;
+    if (sqlite3_prepare_v2(db, delCrewSql, -1, &stCrew, nullptr) == SQLITE_OK) {
+        sqlite3_bind_int64(stCrew, 1, id);
+        sqlite3_step(stCrew);
+        sqlite3_finalize(stCrew);
     }
 
-    // Семантику "void remove" залишаємо як є:
-    // якщо id не існує — просто 0 changes без винятку.
+    // 2. Видаляємо людину
+    const char* sql = "DELETE FROM people WHERE id=?;";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
+        throw std::runtime_error(sqlite3_errmsg(db));
+    }
+
+    sqlite3_bind_int64(st, 1, id);
+
+    if (sqlite3_step(st) != SQLITE_DONE) {
+        sqlite3_finalize(st);
+        throw std::runtime_error("PeopleRepo::remove failed: " + std::string(sqlite3_errmsg(db)));
+    }
+    sqlite3_finalize(st);
 }

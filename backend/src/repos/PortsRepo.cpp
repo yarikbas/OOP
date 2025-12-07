@@ -1,4 +1,5 @@
-﻿#include "repos/PortsRepo.h"
+﻿// src/repos/PortsRepo.cpp
+#include "repos/PortsRepo.h"
 #include "db/Db.h"
 
 #include <sqlite3.h>
@@ -137,10 +138,13 @@ bool PortsRepo::update(const Port& p) const {
 
     const int rc = sqlite3_step(st.get());
     if (rc != SQLITE_DONE) {
-        return false;
+        throw std::runtime_error(std::string("PortsRepo::update failed: ") + sqlite3_errmsg(db_));
     }
 
-    return sqlite3_changes(db_) > 0;
+    // Важливо для CRUD:
+    // Контролер уже перевіряє існування порту.
+    // Тому "нічого не змінилось" не має трактуватися як помилка.
+    return true;
 }
 
 // ------------------ REMOVE ------------------
@@ -155,8 +159,12 @@ bool PortsRepo::remove(int64_t id) const {
 
     const int rc = sqlite3_step(st.get());
     if (rc != SQLITE_DONE) {
-        return false;
+        // Важливо: FK/UNIQUE/інші constraint-и мають підняти виняток,
+        // щоб контролер міг повернути коректний HTTP (409/400),
+        // а не маскувати це як "not found".
+        throw std::runtime_error(std::string("PortsRepo::remove failed: ") + sqlite3_errmsg(db_));
     }
 
+    // false = реально не знайдено
     return sqlite3_changes(db_) > 0;
 }

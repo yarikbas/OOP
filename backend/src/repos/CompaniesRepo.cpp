@@ -27,7 +27,6 @@ public:
 
     sqlite3_stmt* get() const noexcept { return st_; }
 
-    // non-copyable
     Stmt(const Stmt&) = delete;
     Stmt& operator=(const Stmt&) = delete;
 
@@ -141,16 +140,15 @@ bool CompaniesRepo::update(std::int64_t id, const std::string& name) {
 
     const char* sql = "UPDATE companies SET name=? WHERE id=?";
 
-    try {
-        Stmt st(db, sql);
-        sqlite3_bind_text(st.get(), 1, name.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int64(st.get(), 2, id);
+    Stmt st(db, sql);
+    sqlite3_bind_text(st.get(), 1, name.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st.get(), 2, id);
 
-        const bool ok = (sqlite3_step(st.get()) == SQLITE_DONE) && (sqlite3_changes(db) > 0);
-        return ok;
-    } catch (...) {
-        return false; // зберігаємо стару семантику bool-методу
+    if (sqlite3_step(st.get()) != SQLITE_DONE) {
+        throw std::runtime_error(std::string("update company failed: ") + sqlite3_errmsg(db));
     }
+
+    return sqlite3_changes(db) > 0;
 }
 
 // ✅ overload під тести
@@ -163,15 +161,14 @@ bool CompaniesRepo::remove(std::int64_t id) {
 
     const char* sql = "DELETE FROM companies WHERE id=?";
 
-    try {
-        Stmt st(db, sql);
-        sqlite3_bind_int64(st.get(), 1, id);
+    Stmt st(db, sql);
+    sqlite3_bind_int64(st.get(), 1, id);
 
-        const bool ok = (sqlite3_step(st.get()) == SQLITE_DONE) && (sqlite3_changes(db) > 0);
-        return ok;
-    } catch (...) {
-        return false;
+    if (sqlite3_step(st.get()) != SQLITE_DONE) {
+        throw std::runtime_error(std::string("delete company failed: ") + sqlite3_errmsg(db));
     }
+
+    return sqlite3_changes(db) > 0;
 }
 
 // ---- company ↔ ports -------------------------------------------
@@ -199,12 +196,11 @@ std::vector<Port> CompaniesRepo::ports(std::int64_t companyId) {
 bool CompaniesRepo::addPort(std::int64_t companyId, std::int64_t portId, bool isMain) {
     sqlite3* db = Db::instance().handle();
 
-    // Робимо операцію атомарною, якщо ставимо головний порт
-    try {
-        if (isMain) {
-            execSimple(db, "BEGIN;");
-        }
+    if (isMain) {
+        execSimple(db, "BEGIN;");
+    }
 
+    try {
         if (isMain) {
             const char* clearSql =
                 "UPDATE company_ports SET is_main=0 WHERE company_id=?";
@@ -213,12 +209,11 @@ bool CompaniesRepo::addPort(std::int64_t companyId, std::int64_t portId, bool is
             sqlite3_bind_int64(clear.get(), 1, companyId);
 
             if (sqlite3_step(clear.get()) != SQLITE_DONE) {
-                if (isMain) execSimple(db, "ROLLBACK;");
-                return false;
+                throw std::runtime_error(std::string("clear main port failed: ") + sqlite3_errmsg(db));
             }
         }
 
-        // Upsert: або вставляємо, або оновлюємо is_main
+        // Upsert
         const char* upsertSql =
             "INSERT INTO company_ports(company_id,port_id,is_main) "
             "VALUES(?,?,?) "
@@ -230,10 +225,8 @@ bool CompaniesRepo::addPort(std::int64_t companyId, std::int64_t portId, bool is
         sqlite3_bind_int64(up.get(), 2, portId);
         sqlite3_bind_int64(up.get(), 3, isMain ? 1 : 0);
 
-        const int rc = sqlite3_step(up.get());
-        if (rc != SQLITE_DONE) {
-            if (isMain) execSimple(db, "ROLLBACK;");
-            return false;
+        if (sqlite3_step(up.get()) != SQLITE_DONE) {
+            throw std::runtime_error(std::string("add port failed: ") + sqlite3_errmsg(db));
         }
 
         if (isMain) {
@@ -244,7 +237,7 @@ bool CompaniesRepo::addPort(std::int64_t companyId, std::int64_t portId, bool is
         if (isMain) {
             sqlite3_exec(db, "ROLLBACK;", nullptr, nullptr, nullptr);
         }
-        return false;
+        throw;
     }
 }
 
@@ -254,16 +247,15 @@ bool CompaniesRepo::removePort(std::int64_t companyId, std::int64_t portId) {
     const char* sql =
         "DELETE FROM company_ports WHERE company_id=? AND port_id=?";
 
-    try {
-        Stmt st(db, sql);
-        sqlite3_bind_int64(st.get(), 1, companyId);
-        sqlite3_bind_int64(st.get(), 2, portId);
+    Stmt st(db, sql);
+    sqlite3_bind_int64(st.get(), 1, companyId);
+    sqlite3_bind_int64(st.get(), 2, portId);
 
-        const bool ok = (sqlite3_step(st.get()) == SQLITE_DONE) && (sqlite3_changes(db) > 0);
-        return ok;
-    } catch (...) {
-        return false;
+    if (sqlite3_step(st.get()) != SQLITE_DONE) {
+        throw std::runtime_error(std::string("remove port failed: ") + sqlite3_errmsg(db));
     }
+
+    return sqlite3_changes(db) > 0;
 }
 
 // ---- company ↔ ships -------------------------------------------

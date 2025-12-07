@@ -17,7 +17,22 @@ def safe_cols(df: pd.DataFrame, cols: list[str]) -> list[str]:
 
 
 def dataframe_1based(df: pd.DataFrame):
-    st.dataframe(api.df_1based(df), use_container_width=True)
+    df = api.df_1based(df)
+    # Новий API Streamlit
+    try:
+        st.dataframe(df, width="stretch")
+    except TypeError:
+        # Fallback для старих версій
+        st.dataframe(df, width="stretch")
+
+
+def map_stretch(df: pd.DataFrame):
+    # Новий API Streamlit
+    try:
+        st.map(df, width="stretch")
+    except TypeError:
+        # Fallback для старих версій
+        st.map(df, use_container_width=True)
 
 
 @st.cache_data(ttl=10)
@@ -166,7 +181,7 @@ with col_map:
 
     if {"lat", "lon"}.issubset(ports_df.columns):
         ports_for_map = ports_df.rename(columns={"lat": "latitude", "lon": "longitude"})
-        st.map(ports_for_map[["latitude", "longitude"]], use_container_width=True)
+        map_stretch(ports_for_map[["latitude", "longitude"]])
     else:
         st.error("У таблиці портів немає координат lat/lon.")
 

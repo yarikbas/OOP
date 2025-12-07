@@ -369,12 +369,13 @@ def sticky_tabs(labels: list[str], key: str, default: int = 0) -> str:
     # key віджета = state_key
     # Streamlit сам оновить st.session_state[state_key]
     choice = st.radio(
-        label="",
+        label=f"tabs_{key}",  # будь-який НЕпорожній текст
         options=labels,
         index=idx,
         horizontal=True,
         key=state_key,
         label_visibility="collapsed",
     )
+
 
     return choice

@@ -1,5 +1,4 @@
-﻿// src/db/Db.cpp
-#include "db/Db.h"
+﻿#include "db/Db.h"
 
 #include <sqlite3.h>
 #include <filesystem>
@@ -9,18 +8,16 @@
 
 namespace {
 
-// Тепер приймає std::string і всередині викликає sqlite3_exec(sql.c_str())
 void execOrThrow(sqlite3* db, const std::string& sql) {
     char* err = nullptr;
     const int rc = sqlite3_exec(db, sql.c_str(), nullptr, nullptr, &err);
     if (rc != SQLITE_OK) {
         std::string msg = err ? err : sqlite3_errmsg(db);
         if (err) sqlite3_free(err);
-        throw std::runtime_error("sqlite exec failed: " + msg);
+        throw std::runtime_error("sqlite exec failed: " + msg + " | SQL: " + sql);
     }
 }
 
-// Аналогічно – працюємо з std::string
 int scalarInt(sqlite3* db, const std::string& sql) {
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(db, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) {
@@ -31,11 +28,11 @@ int scalarInt(sqlite3* db, const std::string& sql) {
     if (sqlite3_step(st) == SQLITE_ROW) {
         value = sqlite3_column_int(st, 0);
     }
+
     sqlite3_finalize(st);
     return value;
 }
 
-// І тут table/column – std::string
 bool columnExists(sqlite3* db, const std::string& table, const std::string& column) {
     sqlite3_stmt* st = nullptr;
     const std::string sql = "PRAGMA table_info(" + table + ");";
@@ -46,7 +43,7 @@ bool columnExists(sqlite3* db, const std::string& table, const std::string& colu
 
     bool found = false;
     while (sqlite3_step(st) == SQLITE_ROW) {
-        const unsigned char* name = sqlite3_column_text(st, 1); // column name
+        const unsigned char* name = sqlite3_column_text(st, 1);
         if (name && std::string(reinterpret_cast<const char*>(name)) == column) {
             found = true;
             break;
@@ -57,7 +54,6 @@ bool columnExists(sqlite3* db, const std::string& table, const std::string& colu
     return found;
 }
 
-// Тут код не міняється логічно – просто виклики тепер йдуть на string-версії
 void ensureColumn(sqlite3* db,
                   const std::string& table,
                   const std::string& column,
@@ -70,6 +66,9 @@ void ensureColumn(sqlite3* db,
         execOrThrow(db, sql);
     }
 }
+
+// СІДИ НАВМИСНО ВИМКНЕНО.
+constexpr bool kEnableSeeding = false;
 
 void seedPortsIfEmpty(sqlite3* db) {
     const int cnt = scalarInt(db, "SELECT COUNT(*) FROM ports;");
@@ -119,13 +118,14 @@ void seedShipsIfEmpty(sqlite3* db) {
 
 } // namespace
 
-Db& Db::instance() { // <-- без noexcept
+Db& Db::instance() {
     static Db inst;
     return inst;
 }
 
 Db::Db() {
     namespace fs = std::filesystem;
+
     fs::create_directories("data");
 
     const char* path = "data/app.db";
@@ -168,17 +168,6 @@ void Db::runMigrations() {
         ");"
     );
 
-    // seed ship_types
-    execOrThrow(db_,
-        "INSERT OR IGNORE INTO ship_types(code,name,description) VALUES"
-        "('cargo','Cargo','General cargo / container'),"
-        "('military','Military','Warship / patrol'),"
-        "('passenger','Passenger','Ferry / cruise'),"
-        "('tanker','Tanker','Oil / LNG / chemical'),"
-        "('tug','Tug','Harbor tug / service'),"
-        "('research','Research','Oceanographic / survey');"
-    );
-
     // --- PEOPLE ---
     execOrThrow(db_,
         "CREATE TABLE IF NOT EXISTS people ("
@@ -189,18 +178,8 @@ void Db::runMigrations() {
         ");"
     );
 
-    // --- SHIPS ---
-    execOrThrow(db_,
-        "CREATE TABLE IF NOT EXISTS ships ("
-        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "  name TEXT NOT NULL UNIQUE,"
-        "  type TEXT NOT NULL,"
-        "  country TEXT NOT NULL,"
-        "  port_id INTEGER,"
-        "  status TEXT DEFAULT 'docked',"
-        "  FOREIGN KEY(port_id) REFERENCES ports(id)"
-        ");"
-    );
+    ensureColumn(db_, "people", "rank", "TEXT");
+    ensureColumn(db_, "people", "active", "INTEGER DEFAULT 1");
 
     // --- COMPANIES ---
     execOrThrow(db_,
@@ -213,13 +192,35 @@ void Db::runMigrations() {
         ");"
     );
 
+    // апгрейди companies для старих БД
+    ensureColumn(db_, "companies", "country", "TEXT");
+    ensureColumn(db_, "companies", "port_id", "INTEGER");
+
+    // --- SHIPS ---
+    // ВАЖЛИВО: одразу включаємо company_id в базову схему
+    execOrThrow(db_,
+        "CREATE TABLE IF NOT EXISTS ships ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  name TEXT NOT NULL UNIQUE,"
+        "  type TEXT NOT NULL,"
+        "  country TEXT NOT NULL,"
+        "  port_id INTEGER,"
+        "  status TEXT DEFAULT 'docked',"
+        "  company_id INTEGER,"
+        "  FOREIGN KEY(port_id) REFERENCES ports(id),"
+        "  FOREIGN KEY(company_id) REFERENCES companies(id)"
+        ");"
+    );
+
     // --- ships schema upgrades for older app.db versions ---
     ensureColumn(db_, "ships", "type", "TEXT NOT NULL DEFAULT 'cargo'");
     ensureColumn(db_, "ships", "country", "TEXT NOT NULL DEFAULT 'Unknown'");
     ensureColumn(db_, "ships", "port_id", "INTEGER");
     ensureColumn(db_, "ships", "status", "TEXT NOT NULL DEFAULT 'docked'");
     ensureColumn(db_, "ships", "company_id", "INTEGER");
+
     execOrThrow(db_, "CREATE INDEX IF NOT EXISTS idx_ships_company ON ships(company_id);");
+    execOrThrow(db_, "CREATE INDEX IF NOT EXISTS idx_ships_port ON ships(port_id);");
 
     // --- COMPANY_PORTS ---
     execOrThrow(db_,
@@ -238,7 +239,6 @@ void Db::runMigrations() {
         "ON company_ports(company_id) WHERE is_main=1;"
     );
 
-    // FIX: дужка + крапка з комою
     execOrThrow(db_,
         "CREATE INDEX IF NOT EXISTS idx_company_ports_port "
         "ON company_ports(port_id);"
@@ -262,11 +262,16 @@ void Db::runMigrations() {
         ");"
     );
 
+    // Якщо раніше був не-unique індекс
+    execOrThrow(db_, "DROP INDEX IF EXISTS idx_crew_ship_active;");
+
+    // ✅ 1 активне призначення на корабель
     execOrThrow(db_,
-        "CREATE INDEX IF NOT EXISTS idx_crew_ship_active "
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_crew_ship_active "
         "ON crew_assignments(ship_id) WHERE end_utc IS NULL;"
     );
 
+    // ✅ 1 активне призначення на людину
     execOrThrow(db_,
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_crew_person_active "
         "ON crew_assignments(person_id) WHERE end_utc IS NULL;"
@@ -275,24 +280,35 @@ void Db::runMigrations() {
     execOrThrow(db_, "CREATE INDEX IF NOT EXISTS crew_ship_idx ON crew_assignments(ship_id);");
     execOrThrow(db_, "CREATE INDEX IF NOT EXISTS crew_person_idx ON crew_assignments(person_id);");
 
-    // --- seed PORTS / SHIPS ---
-    seedPortsIfEmpty(db_);
-    seedShipsIfEmpty(db_);
+    // --- AUTO-SEEDING DISABLED ---
+    if (kEnableSeeding) {
+        seedPortsIfEmpty(db_);
+        seedShipsIfEmpty(db_);
+    }
 }
 
 void Db::reset() {
-    char* err = nullptr;
+    // reset для тестів: чистимо бізнес-дані,
+    // але НЕ чіпаємо ports/ship_types, щоб ShipsRepo::create не падав з нуля
 
-    sqlite3_exec(db_, "DELETE FROM crew_assignments;", nullptr, nullptr, &err);
-    if (err) { sqlite3_free(err); err = nullptr; }
+    execOrThrow(db_, "BEGIN;");
+    try {
+        execOrThrow(db_, "DELETE FROM crew_assignments;");
+        execOrThrow(db_, "DELETE FROM company_ports;");
+        execOrThrow(db_, "DELETE FROM ships;");
+        execOrThrow(db_, "DELETE FROM people;");
+        execOrThrow(db_, "DELETE FROM companies;");
 
-    sqlite3_exec(db_, "DELETE FROM ships;", nullptr, nullptr, &err);
-    if (err) { sqlite3_free(err); err = nullptr; }
+        execOrThrow(
+            db_,
+            "DELETE FROM sqlite_sequence WHERE name IN ("
+            "'crew_assignments','company_ports','ships','people','companies'"
+            ");"
+        );
 
-    sqlite3_exec(
-        db_,
-        "DELETE FROM sqlite_sequence WHERE name IN ('crew_assignments','ships');",
-        nullptr, nullptr, &err
-    );
-    if (err) { sqlite3_free(err); err = nullptr; }
+        execOrThrow(db_, "COMMIT;");
+    } catch (...) {
+        sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+        throw;
+    }
 }

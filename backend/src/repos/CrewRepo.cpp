@@ -54,10 +54,12 @@ CrewAssignment parseRow(sqlite3_stmt* st) {
     return a;
 }
 
-bool isConstraintError(int rc) {
-    return rc == SQLITE_CONSTRAINT ||
-           rc == SQLITE_CONSTRAINT_UNIQUE ||
-           rc == SQLITE_CONSTRAINT_PRIMARYKEY;
+// Бізнес-конфлікти для assign:
+// ми очікуємо їх від partial UNIQUE індексів активних призначень
+bool isBusinessUniqueConflict(sqlite3* db) {
+    const int ext = sqlite3_extended_errcode(db);
+    return ext == SQLITE_CONSTRAINT_UNIQUE ||
+           ext == SQLITE_CONSTRAINT_PRIMARYKEY;
 }
 
 } // namespace
@@ -88,48 +90,44 @@ std::optional<CrewAssignment> CrewRepo::assign(long long personId,
     sqlite3* db = Db::instance().handle();
 
     // Покладаємось на partial unique index:
-    // ux_crew_person_active(person_id) WHERE end_utc IS NULL
+    //  - ux_crew_person_active(person_id) WHERE end_utc IS NULL
+    //  - idx_crew_ship_active(ship_id)    WHERE end_utc IS NULL
     const char* insSql =
         "INSERT INTO crew_assignments(person_id, ship_id, start_utc) "
         "VALUES(?,?,?)";
 
-    try {
-        Stmt ins(db, insSql);
+    Stmt ins(db, insSql);
 
-        sqlite3_bind_int64(ins.get(), 1, static_cast<std::int64_t>(personId));
-        sqlite3_bind_int64(ins.get(), 2, static_cast<std::int64_t>(shipId));
-        sqlite3_bind_text (ins.get(), 3, startUtc.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(ins.get(), 1, static_cast<std::int64_t>(personId));
+    sqlite3_bind_int64(ins.get(), 2, static_cast<std::int64_t>(shipId));
+    sqlite3_bind_text (ins.get(), 3, startUtc.c_str(), -1, SQLITE_TRANSIENT);
 
-        const int rc = sqlite3_step(ins.get());
-        if (rc != SQLITE_DONE) {
-            // Конфлікт активного призначення → бізнес-відмова
-            if (isConstraintError(rc)) {
-                return std::nullopt;
-            }
-            throw std::runtime_error(sqlite3_errmsg(db));
+    const int rc = sqlite3_step(ins.get());
+    if (rc != SQLITE_DONE) {
+        // Бізнес-конфлікт: активне призначення вже існує
+        if (rc == SQLITE_CONSTRAINT && isBusinessUniqueConflict(db)) {
+            return std::nullopt;
         }
-
-        const std::int64_t id = sqlite3_last_insert_rowid(db);
-
-        const char* selSql =
-            "SELECT id, person_id, ship_id, start_utc, end_utc "
-            "FROM crew_assignments WHERE id=?";
-
-        Stmt sel(db, selSql);
-        sqlite3_bind_int64(sel.get(), 1, id);
-
-        if (sqlite3_step(sel.get()) == SQLITE_ROW) {
-            return parseRow(sel.get());
-        }
-
-        throw std::runtime_error("insert ok but fetch failed");
-    } catch (const std::runtime_error&) {
-        // даємо контролеру вирішити 500
-        throw;
+        throw std::runtime_error(sqlite3_errmsg(db));
     }
+
+    const std::int64_t id = sqlite3_last_insert_rowid(db);
+
+    const char* selSql =
+        "SELECT id, person_id, ship_id, start_utc, end_utc "
+        "FROM crew_assignments WHERE id=?";
+
+    Stmt sel(db, selSql);
+    sqlite3_bind_int64(sel.get(), 1, id);
+
+    if (sqlite3_step(sel.get()) == SQLITE_ROW) {
+        return parseRow(sel.get());
+    }
+
+    throw std::runtime_error("insert ok but fetch failed");
 }
 
-// ✅ НОВЕ: завершити призначення за id поточним часом SQLite
+// ✅ завершити призначення за id поточним часом SQLite
 bool CrewRepo::end(long long assignmentId) {
     sqlite3* db = Db::instance().handle();
 
@@ -138,22 +136,18 @@ bool CrewRepo::end(long long assignmentId) {
         "SET end_utc = datetime('now') "
         "WHERE id = ? AND end_utc IS NULL";
 
-    try {
-        Stmt st(db, sql);
-        sqlite3_bind_int64(st.get(), 1, static_cast<std::int64_t>(assignmentId));
+    Stmt st(db, sql);
+    sqlite3_bind_int64(st.get(), 1, static_cast<std::int64_t>(assignmentId));
 
-        const int rc = sqlite3_step(st.get());
-        if (rc != SQLITE_DONE) {
-            return false;
-        }
-
-        return sqlite3_changes(db) > 0;
-    } catch (...) {
-        return false;
+    const int rc = sqlite3_step(st.get());
+    if (rc != SQLITE_DONE) {
+        throw std::runtime_error(sqlite3_errmsg(db));
     }
+
+    return sqlite3_changes(db) > 0;
 }
 
-// ✅ НОВЕ: завершити призначення за id з явним endUtc
+// ✅ завершити призначення за id з явним endUtc
 bool CrewRepo::end(long long assignmentId, const std::string& endUtc) {
     sqlite3* db = Db::instance().handle();
 
@@ -162,21 +156,17 @@ bool CrewRepo::end(long long assignmentId, const std::string& endUtc) {
         "SET end_utc = ? "
         "WHERE id = ? AND end_utc IS NULL";
 
-    try {
-        Stmt st(db, sql);
+    Stmt st(db, sql);
 
-        sqlite3_bind_text (st.get(), 1, endUtc.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int64(st.get(), 2, static_cast<std::int64_t>(assignmentId));
+    sqlite3_bind_text (st.get(), 1, endUtc.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st.get(), 2, static_cast<std::int64_t>(assignmentId));
 
-        const int rc = sqlite3_step(st.get());
-        if (rc != SQLITE_DONE) {
-            return false;
-        }
-
-        return sqlite3_changes(db) > 0;
-    } catch (...) {
-        return false;
+    const int rc = sqlite3_step(st.get());
+    if (rc != SQLITE_DONE) {
+        throw std::runtime_error(sqlite3_errmsg(db));
     }
+
+    return sqlite3_changes(db) > 0;
 }
 
 bool CrewRepo::endActiveByPerson(long long personId, const std::string& endUtc) {
@@ -187,19 +177,15 @@ bool CrewRepo::endActiveByPerson(long long personId, const std::string& endUtc) 
         "SET end_utc=? "
         "WHERE person_id=? AND end_utc IS NULL";
 
-    try {
-        Stmt st(db, sql);
+    Stmt st(db, sql);
 
-        sqlite3_bind_text (st.get(), 1, endUtc.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int64(st.get(), 2, static_cast<std::int64_t>(personId));
+    sqlite3_bind_text (st.get(), 1, endUtc.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st.get(), 2, static_cast<std::int64_t>(personId));
 
-        const int rc = sqlite3_step(st.get());
-        if (rc != SQLITE_DONE) {
-            return false;
-        }
-
-        return sqlite3_changes(db) > 0;
-    } catch (...) {
-        return false;
+    const int rc = sqlite3_step(st.get());
+    if (rc != SQLITE_DONE) {
+        throw std::runtime_error(sqlite3_errmsg(db));
     }
+
+    return sqlite3_changes(db) > 0;
 }

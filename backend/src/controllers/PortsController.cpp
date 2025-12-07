@@ -1,4 +1,5 @@
-﻿#include "controllers/PortsController.h"
+﻿// src/controllers/PortsController.cpp
+#include "controllers/PortsController.h"
 #include "repos/PortsRepo.h"
 
 #include <drogon/drogon.h>
@@ -42,10 +43,27 @@ bool hasNonEmptyString(const Json::Value& v, const char* key) {
 }
 
 bool hasNumber(const Json::Value& v, const char* key) {
-    return v.isMember(key) && (v[key].isDouble() || v[key].isInt() || v[key].isUInt() || v[key].isIntegral());
+    return v.isMember(key) &&
+           (v[key].isDouble() || v[key].isInt() || v[key].isUInt() || v[key].isIntegral());
+}
+
+// best-effort мапінг типових SQLite повідомлень
+HttpStatusCode mapDbErrorToHttp(const std::string& msg) {
+    if (msg.find("UNIQUE") != std::string::npos || msg.find("unique") != std::string::npos) {
+        return drogon::k409Conflict;
+    }
+    if (msg.find("FOREIGN KEY") != std::string::npos || msg.find("foreign key") != std::string::npos) {
+        return drogon::k409Conflict;
+    }
+    if (msg.find("NOT NULL") != std::string::npos || msg.find("not null") != std::string::npos) {
+        return drogon::k400BadRequest;
+    }
+    return drogon::k500InternalServerError;
 }
 
 } // namespace
+
+// ================== LIST ==================
 
 void PortsController::list(const HttpRequestPtr&,
                            std::function<void(const HttpResponsePtr&)>&& cb) {
@@ -64,6 +82,8 @@ void PortsController::list(const HttpRequestPtr&,
         cb(jsonError("list failed", drogon::k500InternalServerError, e.what()));
     }
 }
+
+// ================== CREATE ==================
 
 void PortsController::create(const HttpRequestPtr& req,
                              std::function<void(const HttpResponsePtr&)>&& cb) {
@@ -104,9 +124,11 @@ void PortsController::create(const HttpRequestPtr& req,
     } catch (const std::exception& e) {
         LOG_ERROR << "PortsController::create failed name='" << p.name
                   << "': " << e.what();
-        cb(jsonError("create failed", drogon::k500InternalServerError, e.what()));
+        cb(jsonError("create failed", mapDbErrorToHttp(e.what()), e.what()));
     }
 }
+
+// ================== GET ONE ==================
 
 void PortsController::getOne(const HttpRequestPtr&,
                              std::function<void(const HttpResponsePtr&)>&& cb,
@@ -127,6 +149,8 @@ void PortsController::getOne(const HttpRequestPtr&,
         cb(jsonError("get failed", drogon::k500InternalServerError, e.what()));
     }
 }
+
+// ================== UPDATE ==================
 
 void PortsController::update(const HttpRequestPtr& req,
                              std::function<void(const HttpResponsePtr&)>&& cb,
@@ -182,18 +206,21 @@ void PortsController::update(const HttpRequestPtr& req,
             p.lon = body["lon"].asDouble();
         }
 
-        if (!repo.update(p)) {
-            cb(jsonError("update failed", drogon::k500InternalServerError));
-            return;
-        }
+        // ВАЖЛИВО:
+        // з новим PortsRepo::update:
+        // - кидає exception при помилці
+        // - повертає true навіть якщо значення ті самі
+        repo.update(p);
 
         cb(HttpResponse::newHttpJsonResponse(portToJson(p)));
     } catch (const std::exception& e) {
         LOG_ERROR << "PortsController::update failed id=" << id
                   << ": " << e.what();
-        cb(jsonError("update failed", drogon::k500InternalServerError, e.what()));
+        cb(jsonError("update failed", mapDbErrorToHttp(e.what()), e.what()));
     }
 }
+
+// ================== REMOVE ==================
 
 void PortsController::remove(const HttpRequestPtr&,
                              std::function<void(const HttpResponsePtr&)>&& cb,
@@ -201,7 +228,18 @@ void PortsController::remove(const HttpRequestPtr&,
     try {
         PortsRepo repo;
 
-        if (!repo.remove(id)) {
+        // Явно перевіряємо існування
+        const auto portOpt = repo.getById(id);
+        if (!portOpt) {
+            cb(jsonError("not found", drogon::k404NotFound));
+            return;
+        }
+
+        // З новим PortsRepo::remove:
+        // - false = реально не знайдено (малоймовірно після перевірки)
+        // - FK/інші проблеми -> exception
+        const bool ok = repo.remove(id);
+        if (!ok) {
             cb(jsonError("not found", drogon::k404NotFound));
             return;
         }
@@ -212,6 +250,6 @@ void PortsController::remove(const HttpRequestPtr&,
     } catch (const std::exception& e) {
         LOG_ERROR << "PortsController::remove failed id=" << id
                   << ": " << e.what();
-        cb(jsonError("remove failed", drogon::k500InternalServerError, e.what()));
+        cb(jsonError("remove failed", mapDbErrorToHttp(e.what()), e.what()));
     }
 }

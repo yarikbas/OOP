@@ -1,9 +1,9 @@
-﻿#include "repos/ShipsRepo.h"
+﻿// src/repos/ShipsRepo.cpp
+#include "repos/ShipsRepo.h"
 #include "db/Db.h"
 
 #include <sqlite3.h>
 
-#include <algorithm>
 #include <cstdint>
 #include <optional>
 #include <stdexcept>
@@ -46,24 +46,18 @@ Ship parseShip(sqlite3_stmt* st) {
     s.name       = safe_text(st, 1);
     s.type       = safe_text(st, 2);
     s.country    = safe_text(st, 3);
-    s.port_id    = sqlite3_column_int64(st, 4);
+    s.port_id    = sqlite3_column_int64(st, 4); // якщо NULL -> 0 (OK як sentinel)
     s.status     = safe_text(st, 5);
     s.company_id = sqlite3_column_int64(st, 6); // якщо NULL -> 0
     return s;
 }
 
-// Якщо при створенні корабля port_id == 0,
-// підбираємо перший існуючий порт з таблиці ports.
-std::int64_t resolvePortId(sqlite3* db, std::int64_t desired) {
-    if (desired > 0) return desired;
-
-    const char* sql = "SELECT id FROM ports ORDER BY id LIMIT 1";
-    Stmt st(db, sql);
-
-    if (sqlite3_step(st.get()) == SQLITE_ROW) {
-        return sqlite3_column_int64(st.get(), 0);
+inline void bindNullableInt64(sqlite3_stmt* st, int idx, std::int64_t v) {
+    if (v > 0) {
+        sqlite3_bind_int64(st, idx, v);
+    } else {
+        sqlite3_bind_null(st, idx);
     }
-    return 0;
 }
 
 } // namespace
@@ -89,7 +83,6 @@ std::vector<Ship> ShipsRepo::all() {
 }
 
 // ===================== BY PORT =====================
-// (у тебе це є в .h, тому додаємо реалізацію)
 
 std::vector<Ship> ShipsRepo::getByPortId(long long portId) {
     sqlite3* db = Db::instance().handle();
@@ -136,24 +129,23 @@ std::optional<Ship> ShipsRepo::byId(long long id) {
 Ship ShipsRepo::create(const Ship& sIn) {
     sqlite3* db = Db::instance().handle();
 
-    // 1) Визначаємо порт: якщо port_id не вказаний, беремо перший існуючий порт.
-    const std::int64_t portId = resolvePortId(db, sIn.port_id);
-    if (portId <= 0) {
-        throw std::runtime_error("No valid port found for new ship");
-    }
-
     const char* sql =
         "INSERT INTO ships(name, type, country, port_id, status, company_id) "
         "VALUES(?,?,?,?,?,?);";
 
     Stmt st(db, sql);
 
-    sqlite3_bind_text (st.get(), 1, sIn.name.c_str(),    -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text (st.get(), 2, sIn.type.c_str(),    -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text (st.get(), 3, sIn.country.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int64(st.get(), 4, portId);
-    sqlite3_bind_text (st.get(), 5, sIn.status.c_str(),  -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int64(st.get(), 6, static_cast<std::int64_t>(sIn.company_id));
+    sqlite3_bind_text(st.get(), 1, sIn.name.c_str(),    -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st.get(), 2, sIn.type.c_str(),    -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st.get(), 3, sIn.country.c_str(), -1, SQLITE_TRANSIENT);
+
+    // port_id: 0/не задано -> NULL
+    bindNullableInt64(st.get(), 4, static_cast<std::int64_t>(sIn.port_id));
+
+    sqlite3_bind_text(st.get(), 5, sIn.status.c_str(),  -1, SQLITE_TRANSIENT);
+
+    // company_id: 0/не задано -> NULL
+    bindNullableInt64(st.get(), 6, static_cast<std::int64_t>(sIn.company_id));
 
     const int rc = sqlite3_step(st.get());
     if (rc != SQLITE_DONE) {
@@ -161,8 +153,7 @@ Ship ShipsRepo::create(const Ship& sIn) {
     }
 
     Ship out = sIn;
-    out.id      = sqlite3_last_insert_rowid(db);
-    out.port_id = portId;
+    out.id = sqlite3_last_insert_rowid(db);
     return out;
 }
 
@@ -178,12 +169,16 @@ void ShipsRepo::update(const Ship& s) {
 
     Stmt st(db, sql);
 
-    sqlite3_bind_text (st.get(), 1, s.name.c_str(),    -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text (st.get(), 2, s.type.c_str(),    -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text (st.get(), 3, s.country.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int64(st.get(), 4, static_cast<std::int64_t>(s.port_id));
-    sqlite3_bind_text (st.get(), 5, s.status.c_str(),  -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int64(st.get(), 6, static_cast<std::int64_t>(s.company_id));
+    sqlite3_bind_text(st.get(), 1, s.name.c_str(),    -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st.get(), 2, s.type.c_str(),    -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st.get(), 3, s.country.c_str(), -1, SQLITE_TRANSIENT);
+
+    bindNullableInt64(st.get(), 4, static_cast<std::int64_t>(s.port_id));
+
+    sqlite3_bind_text(st.get(), 5, s.status.c_str(),  -1, SQLITE_TRANSIENT);
+
+    bindNullableInt64(st.get(), 6, static_cast<std::int64_t>(s.company_id));
+
     sqlite3_bind_int64(st.get(), 7, static_cast<std::int64_t>(s.id));
 
     const int rc = sqlite3_step(st.get());
@@ -207,4 +202,7 @@ void ShipsRepo::remove(long long id) {
     if (rc != SQLITE_DONE) {
         throw std::runtime_error(std::string("ShipsRepo::remove failed: ") + sqlite3_errmsg(db));
     }
+
+    // Семантика "void remove" збережена:
+    // якщо id не існує — 0 changes без винятку.
 }

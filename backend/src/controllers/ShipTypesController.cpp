@@ -14,6 +14,8 @@ using drogon::HttpResponse;
 using drogon::HttpResponsePtr;
 using drogon::HttpStatusCode;
 
+// ---------------- JSON helpers ----------------
+
 HttpResponsePtr jsonError(const std::string& msg,
                           HttpStatusCode code,
                           const std::string& details = {}) {
@@ -27,6 +29,28 @@ HttpResponsePtr jsonError(const std::string& msg,
     return r;
 }
 
+HttpResponsePtr jsonOk(const std::string& status = "ok") {
+    Json::Value o;
+    o["status"] = status;
+    return HttpResponse::newHttpJsonResponse(o);
+}
+
+// best-effort мапінг типових SQLite повідомлень
+HttpStatusCode mapDbErrorToHttp(const std::string& msg) {
+    if (msg.find("UNIQUE") != std::string::npos || msg.find("unique") != std::string::npos) {
+        return drogon::k409Conflict;
+    }
+    if (msg.find("FOREIGN KEY") != std::string::npos || msg.find("foreign key") != std::string::npos) {
+        return drogon::k409Conflict;
+    }
+    if (msg.find("NOT NULL") != std::string::npos || msg.find("not null") != std::string::npos) {
+        return drogon::k400BadRequest;
+    }
+    return drogon::k500InternalServerError;
+}
+
+// ---------------- JSON mapping ----------------
+
 Json::Value shipTypeToJson(const ShipType& t) {
     Json::Value j;
     j["id"]          = Json::Int64(t.id);
@@ -36,11 +60,20 @@ Json::Value shipTypeToJson(const ShipType& t) {
     return j;
 }
 
-bool nonEmptyStringMember(const Json::Value& v, const char* key) {
+// ---------------- Validation helpers ----------------
+
+bool hasNonEmptyString(const Json::Value& v, const char* key) {
     return v.isMember(key) && v[key].isString() && !v[key].asString().empty();
 }
 
+bool isStringOrNull(const Json::Value& v, const char* key) {
+    if (!v.isMember(key)) return true; // нема поля — ок
+    return v[key].isString() || v[key].isNull();
+}
+
 } // namespace
+
+// ================== LIST ==================
 
 void ShipTypesController::list(const HttpRequestPtr&,
                                std::function<void(const HttpResponsePtr&)>&& cb) {
@@ -59,6 +92,8 @@ void ShipTypesController::list(const HttpRequestPtr&,
     }
 }
 
+// ================== CREATE ==================
+
 void ShipTypesController::create(const HttpRequestPtr& req,
                                  std::function<void(const HttpResponsePtr&)>&& cb) {
     const auto j = req->getJsonObject();
@@ -67,8 +102,13 @@ void ShipTypesController::create(const HttpRequestPtr& req,
         return;
     }
 
-    if (!nonEmptyStringMember(*j, "code") || !nonEmptyStringMember(*j, "name")) {
+    if (!hasNonEmptyString(*j, "code") || !hasNonEmptyString(*j, "name")) {
         cb(jsonError("code and name are required", drogon::k400BadRequest));
+        return;
+    }
+
+    if (!isStringOrNull(*j, "description")) {
+        cb(jsonError("description must be string or null", drogon::k400BadRequest));
         return;
     }
 
@@ -76,8 +116,10 @@ void ShipTypesController::create(const HttpRequestPtr& req,
     t.code = (*j)["code"].asString();
     t.name = (*j)["name"].asString();
 
-    if ((*j).isMember("description") && (*j)["description"].isString()) {
-        t.description = (*j)["description"].asString();
+    if ((*j).isMember("description")) {
+        t.description = (*j)["description"].isNull()
+                            ? ""
+                            : (*j)["description"].asString();
     } else {
         t.description.clear();
     }
@@ -92,9 +134,11 @@ void ShipTypesController::create(const HttpRequestPtr& req,
     } catch (const std::exception& ex) {
         LOG_ERROR << "ShipTypesController::create failed code='"
                   << t.code << "': " << ex.what();
-        cb(jsonError("create failed", drogon::k500InternalServerError, ex.what()));
+        cb(jsonError("create failed", mapDbErrorToHttp(ex.what()), ex.what()));
     }
 }
+
+// ================== GET ONE ==================
 
 void ShipTypesController::getOne(const HttpRequestPtr&,
                                  std::function<void(const HttpResponsePtr&)>&& cb,
@@ -116,12 +160,19 @@ void ShipTypesController::getOne(const HttpRequestPtr&,
     }
 }
 
+// ================== UPDATE ==================
+
 void ShipTypesController::updateOne(const HttpRequestPtr& req,
                                     std::function<void(const HttpResponsePtr&)>&& cb,
                                     std::int64_t id) {
     const auto j = req->getJsonObject();
     if (!j) {
         cb(jsonError("json body required", drogon::k400BadRequest));
+        return;
+    }
+
+    if (!isStringOrNull(*j, "description")) {
+        cb(jsonError("description must be string or null", drogon::k400BadRequest));
         return;
     }
 
@@ -153,30 +204,35 @@ void ShipTypesController::updateOne(const HttpRequestPtr& req,
         }
 
         if ((*j).isMember("description")) {
-            if (!(*j)["description"].isString()) {
-                cb(jsonError("description must be string", drogon::k400BadRequest));
-                return;
-            }
-            t.description = (*j)["description"].asString();
+            t.description = (*j)["description"].isNull()
+                                ? ""
+                                : (*j)["description"].asString();
         }
 
         repo.update(t);
 
-        Json::Value ok;
-        ok["status"] = "updated";
-        cb(HttpResponse::newHttpJsonResponse(ok));
+        cb(jsonOk("updated"));
     } catch (const std::exception& ex) {
         LOG_ERROR << "ShipTypesController::updateOne failed id=" << id
                   << ": " << ex.what();
-        cb(jsonError("update failed", drogon::k500InternalServerError, ex.what()));
+        cb(jsonError("update failed", mapDbErrorToHttp(ex.what()), ex.what()));
     }
 }
+
+// ================== DELETE ==================
 
 void ShipTypesController::deleteOne(const HttpRequestPtr&,
                                     std::function<void(const HttpResponsePtr&)>&& cb,
                                     std::int64_t id) {
     try {
         ShipTypesRepo repo;
+
+        const auto cur = repo.byId(id);
+        if (!cur) {
+            cb(jsonError("not found", drogon::k404NotFound));
+            return;
+        }
+
         repo.remove(id);
 
         auto r = HttpResponse::newHttpResponse();
@@ -185,6 +241,6 @@ void ShipTypesController::deleteOne(const HttpRequestPtr&,
     } catch (const std::exception& ex) {
         LOG_ERROR << "ShipTypesController::deleteOne failed id=" << id
                   << ": " << ex.what();
-        cb(jsonError("delete failed", drogon::k500InternalServerError, ex.what()));
+        cb(jsonError("delete failed", mapDbErrorToHttp(ex.what()), ex.what()));
     }
 }
