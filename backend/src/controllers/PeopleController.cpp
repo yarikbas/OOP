@@ -63,14 +63,14 @@ void PeopleController::create(const HttpRequestPtr& req,
     }
     const auto& j = *jsonPtr;
 
-    if (!hasString(j, "full_name") || !hasString(j, "rank")) {
-        cb(jsonError("Missing full_name or rank", drogon::k400BadRequest));
+    if (!hasString(j, "full_name")) {
+        cb(jsonError("Missing full_name", drogon::k400BadRequest));
         return;
     }
 
     Person p;
     p.full_name = j["full_name"].asString();
-    p.rank = j["rank"].asString();
+    p.rank = hasString(j, "rank") ? j["rank"].asString() : "";
 
     try {
         PeopleRepo repo;
@@ -147,7 +147,7 @@ void PeopleController::deleteOne(const HttpRequestPtr&,
                                  std::int64_t id) {
     try {
         PeopleRepo repo;
-        // Перевіряємо, чи існує людина перед видаленням (опціонально)
+        // Перевіряємо, чи існує людина перед видаленням 
         if (!repo.byId(id)) {
             cb(jsonError("Person not found", drogon::k404NotFound));
             return;

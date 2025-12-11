@@ -20,6 +20,11 @@ add_library(oop_core STATIC
     src/repos/ShipTypesRepo.cpp
     src/repos/CompaniesRepo.cpp
     src/repos/CrewRepo.cpp
+    src/repos/CargoRepo.cpp
+    src/repos/VoyageRecordsRepo.cpp
+    src/repos/VoyageExpensesRepo.cpp
+    src/repos/SchedulesRepo.cpp
+    src/repos/WeatherDataRepo.cpp
 )
 
 target_include_directories(oop_core PUBLIC
@@ -40,6 +45,11 @@ add_executable(oop_backend
     src/controllers/ShipTypesController.cpp
     src/controllers/CompaniesController.cpp
     src/controllers/CrewController.cpp
+    src/controllers/LogsController.cpp
+    src/controllers/CargoController.cpp
+    src/controllers/VoyageRecordsController.cpp
+    src/controllers/SchedulesController.cpp
+    src/controllers/WeatherController.cpp
 )
 
 target_include_directories(oop_backend PRIVATE

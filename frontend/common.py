@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any
+import math
 
 import streamlit as st
 import requests
@@ -11,6 +11,7 @@ import pandas as pd
 
 # ================== КОНФІГ ==================
 BASE_URL = os.getenv("FLEET_BASE_URL", "http://127.0.0.1:8082")
+EXPORT_TOKEN = os.getenv("FLEET_EXPORT_TOKEN", "fleet-export-2025")
 
 # Реюз TCP-з'єднань
 _SESSION = requests.Session()
@@ -19,6 +20,297 @@ _SESSION = requests.Session()
 TTL_SHORT = 3
 TTL_MED = 5
 TTL_LONG = 15
+
+
+# ================== HAVERSINE DISTANCE ==================
+def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """
+    Calculate distance between two points on Earth using haversine formula.
+    Returns distance in kilometers.
+    """
+    # Earth radius in km
+    R = 6371.0
+    
+    # Convert to radians
+    lat1_rad = math.radians(lat1)
+    lon1_rad = math.radians(lon1)
+    lat2_rad = math.radians(lat2)
+    lon2_rad = math.radians(lon2)
+    
+    # Differences
+    dlat = lat2_rad - lat1_rad
+    dlon = lon2_rad - lon1_rad
+    
+    # Haversine formula
+    a = math.sin(dlat / 2)**2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon / 2)**2
+    c = 2 * math.asin(math.sqrt(a))
+    
+    return R * c
+
+
+
+# ================== ЛОКАЛІЗАЦІЯ ==================
+TRANSLATIONS = {
+    "en": {
+        # Common
+        "app_title": "Fleet Manager",
+        "backend_ok": "Backend: OK",
+        "backend_unavailable": "Backend unavailable",
+        "refresh": "🔄 Refresh",
+        "reset_filters": "🗑️ Reset filters",
+        "download_csv": "📥 Download as CSV",
+        "search": "🔎 Search",
+        "filters": "🔍 Filters",
+        "all": "All",
+        "create": "Create",
+        "update": "Update",
+        "delete": "Delete",
+        "save": "💾 Save",
+        "cancel": "Cancel",
+        "edit": "✏️ Edit",
+        "actions": "Actions",
+        "yes": "Yes",
+        "no": "No",
+        
+        # Navigation
+        "ship_management": "Ship Management",
+        "crew_people": "Crew & People",
+        "company_management": "Company Management",
+        "admin_data": "Admin & Data",
+        "logs_analytics": "Logs & Analytics",
+        
+        # Logs & Analytics
+        "logs_title": "Logs & Analytics",
+        "action_type": "Action Type",
+        "object_type": "Object",
+        "all_actions": "All actions",
+        "all_objects": "All objects",
+        "ships": "Ships",
+        "ports": "Ports",
+        "companies": "Companies",
+        "people": "People",
+        "search_messages": "Search in messages",
+        "search_placeholder": "Enter search text...",
+        "importance": "Importance",
+        "all_levels": "All levels",
+        "information": "Information",
+        "warning": "Warning",
+        "error": "Error",
+        "period": "📅 Period",
+        "last_7_days": "Last 7 days",
+        "last_30_days": "Last 30 days",
+        "last_90_days": "Last 90 days",
+        "custom_range": "Custom range",
+        "records_count": "Records count",
+        "from_date": "From",
+        "to_date": "To",
+        "no_records": "📭 No records for selected filters",
+        "time": "Time",
+        "description": "Description",
+        "user": "User",
+        "system": "system",
+        "total_records": "📊 Total records",
+        "errors": "❌ Errors",
+        "warnings": "⚠️ Warnings",
+        "event_history": "📜 Event History",
+        "analytics": "📊 Analytics",
+        "distribution_by_actions": "Distribution by action type",
+        "distribution_by_importance": "Distribution by importance",
+        "activity_by_days": "Activity by days",
+        "no_data": "No data to display",
+        "no_event_data": "No event type data",
+        "no_level_data": "No importance level data",
+        "no_time_data": "No time data",
+        "ship_create": "Ship created",
+        "ship_update": "Ship updated",
+        "ship_delete": "Ship deleted",
+        "port_create": "Port created",
+        "port_update": "Port updated",
+        "port_delete": "Port deleted",
+        "company_create": "Company created",
+        "company_update": "Company updated",
+        "company_delete": "Company deleted",
+        "person_create": "Person added",
+        "person_update": "Person updated",
+        "person_delete": "Person deleted",
+        "other": "Other",
+        "action": "Action",
+        "quantity": "Quantity",
+        "date": "Date",
+        "events_count": "Events count",
+    },
+    "uk": {
+        # Common
+        "app_title": "Менеджер Флоту",
+        "backend_ok": "Backend: OK",
+        "backend_unavailable": "Backend недоступний",
+        "refresh": "🔄 Оновити",
+        "reset_filters": "🗑️ Скинути фільтри",
+        "download_csv": "📥 Завантажити як CSV",
+        "search": "🔎 Пошук",
+        "filters": "🔍 Фільтри",
+        "all": "Всі",
+        "create": "Створити",
+        "update": "Оновити",
+        "delete": "Видалити",
+        "save": "💾 Зберегти",
+        "cancel": "Скасувати",
+        "edit": "✏️ Редагувати",
+        "actions": "Дії",
+        "yes": "Так",
+        "no": "Ні",
+        
+        # Navigation
+        "ship_management": "Керування Кораблями",
+        "crew_people": "Екіпаж і Люди",
+        "company_management": "Керування Компаніями",
+        "admin_data": "Адмін & Дані",
+        "logs_analytics": "Логи і Аналітика",
+        
+        # Logs & Analytics
+        "logs_title": "Логи і Аналітика",
+        "action_type": "Тип дії",
+        "object_type": "Об'єкт",
+        "all_actions": "Всі дії",
+        "all_objects": "Всі об'єкти",
+        "ships": "Кораблі",
+        "ports": "Порти",
+        "companies": "Компанії",
+        "people": "Люди",
+        "search_messages": "Пошук у повідомленнях",
+        "search_placeholder": "Введіть текст для пошуку...",
+        "importance": "Важливість",
+        "all_levels": "Всі рівні",
+        "information": "Інформація",
+        "warning": "Попередження",
+        "error": "Помилка",
+        "period": "📅 Період",
+        "last_7_days": "Останні 7 днів",
+        "last_30_days": "Останні 30 днів",
+        "last_90_days": "Останні 90 днів",
+        "custom_range": "Вибрати діапазон",
+        "records_count": "Кількість записів",
+        "from_date": "З дати",
+        "to_date": "До дати",
+        "no_records": "📭 Немає записів для обраних фільтрів",
+        "time": "Час",
+        "description": "Опис",
+        "user": "Користувач",
+        "system": "система",
+        "total_records": "📊 Всього записів",
+        "errors": "❌ Помилок",
+        "warnings": "⚠️ Попереджень",
+        "event_history": "📜 Історія подій",
+        "analytics": "📊 Аналітика",
+        "distribution_by_actions": "Розподіл за типом дій",
+        "distribution_by_importance": "Розподіл за важливістю",
+        "activity_by_days": "Активність по днях",
+        "no_data": "Немає даних для відображення",
+        "no_event_data": "Немає даних про типи подій",
+        "no_level_data": "Немає даних про рівні важливості",
+        "no_time_data": "Немає даних про час подій",
+        "ship_create": "Створення корабля",
+        "ship_update": "Оновлення корабля",
+        "ship_delete": "Видалення корабля",
+        "port_create": "Створення порту",
+        "port_update": "Оновлення порту",
+        "port_delete": "Видалення порту",
+        "company_create": "Створення компанії",
+        "company_update": "Оновлення компанії",
+        "company_delete": "Видалення компанії",
+        "person_create": "Додано людину",
+        "person_update": "Оновлено людину",
+        "person_delete": "Видалено людину",
+        "other": "інше",
+        "action": "Дія",
+        "quantity": "Кількість",
+        "date": "Дата",
+        "events_count": "Кількість подій",
+    }
+}
+
+def get_lang():
+    """Get current language from session state, default to Ukrainian."""
+    if "language" not in st.session_state:
+        st.session_state.language = "uk"
+    return st.session_state.language
+
+def t(key: str) -> str:
+    """Get translation for key in current language."""
+    lang = get_lang()
+    return TRANSLATIONS.get(lang, {}).get(key, key)
+
+def language_selector():
+    """Display language selector in sidebar."""
+    current_lang = get_lang()
+    lang_options = {"🇺🇦 Українська": "uk", "🇬🇧 English": "en"}
+    selected_label = "🇺🇦 Українська" if current_lang == "uk" else "🇬🇧 English"
+    
+    selected = st.sidebar.selectbox(
+        "🌐 Language / Мова",
+        options=list(lang_options.keys()),
+        index=list(lang_options.values()).index(current_lang),
+        key="lang_selector"
+    )
+    
+    new_lang = lang_options[selected]
+    if new_lang != current_lang:
+        st.session_state.language = new_lang
+        st.rerun()
+
+
+# ================== THEME / LAYOUT ==================
+def inject_theme():
+    """Lightweight CSS helpers for consistent, calm UI styling."""
+    st.markdown(
+        """
+        <style>
+        :root {
+            --fm-bg: #0f172a;
+            --fm-panel: #111827;
+            --fm-panel-alt: #0b1220;
+            --fm-border: #1f2937;
+            --fm-accent: #38bdf8;
+            --fm-accent-2: #22d3ee;
+            --fm-text-sub: #9ca3af;
+        }
+        .block-container { padding-top: 1.3rem; }
+        .fm-hero {
+            padding: 1rem 1.25rem;
+            border-radius: 12px;
+            background: radial-gradient(circle at 10% 20%, rgba(56,189,248,0.12), transparent 35%),
+                        radial-gradient(circle at 80% 10%, rgba(34,211,238,0.12), transparent 32%),
+                        linear-gradient(135deg, #0b1220, #0f172a 60%);
+            border: 1px solid var(--fm-border);
+        }
+        .fm-hero h1 { margin-bottom: 0.3rem; }
+        .fm-hero p { color: var(--fm-text-sub); margin-bottom: 0.4rem; }
+        .fm-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.35rem 0.75rem;
+            border-radius: 999px;
+            border: 1px solid var(--fm-border);
+            background: rgba(56,189,248,0.08);
+            color: #e5e7eb;
+            font-size: 0.88rem;
+        }
+        .fm-card {
+            padding: 0.75rem 0.9rem;
+            border-radius: 12px;
+            border: 1px solid var(--fm-border);
+            background: var(--fm-panel);
+        }
+        .fm-section-title { margin-bottom: 0.35rem; }
+        .stMetric { background: var(--fm-panel); padding: 0.6rem 0.8rem; border-radius: 10px; border: 1px solid var(--fm-border); }
+        .stMetric label, .stMetric [data-testid="stMetricDelta"] { color: var(--fm-text-sub); }
+        .st-expander { border: 1px solid var(--fm-border) !important; border-radius: 10px !important; }
+        .stDownloadButton button { width: 100%; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 # ================== DATAFRAME HELPERS ==================
@@ -280,6 +572,15 @@ def get_active_ship_map() -> dict[int, int]:
     return result
 
 
+@st.cache_data(ttl=5)
+def get_health() -> dict | None:
+    """Return backend health JSON or None on error."""
+    try:
+        return api_get("/health") or None
+    except Exception:
+        return None
+
+
 # ================== ХЕЛПЕРИ ДЛЯ UI ==================
 def get_name_map(df: pd.DataFrame, id_col: str = "id", name_col: str = "name") -> dict:
     """Створює словник {id: name} з DataFrame."""
@@ -379,3 +680,32 @@ def sticky_tabs(labels: list[str], key: str, default: int = 0) -> str:
 
 
     return choice
+
+
+def api_export_json():
+    """Fetch full data export with token auth."""
+    url = _url(f"/api/export?token={EXPORT_TOKEN}")
+    resp = _SESSION.get(url, timeout=10)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def api_export_logs_csv(*, event_type: str = "", entity: str = "", entity_id: str = "", since: str = "", until: str = "") -> str:
+    """Fetch logs CSV with token auth and optional filters."""
+    params = {"token": EXPORT_TOKEN}
+    if event_type:
+        params["event_type"] = event_type
+    if entity:
+        params["entity"] = entity
+    if entity_id:
+        params["entity_id"] = entity_id
+    if since:
+        params["since"] = since
+    if until:
+        params["until"] = until
+    
+    url = _url("/api/logs.csv")
+    resp = _SESSION.get(url, params=params, timeout=15)
+    resp.raise_for_status()
+    return resp.text
+

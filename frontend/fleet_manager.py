@@ -11,6 +11,8 @@ st.set_page_config(
     layout="wide",
 )
 
+api.inject_theme()
+
 # ================== ХЕЛПЕРИ ==================
 def safe_cols(df: pd.DataFrame, cols: list[str]) -> list[str]:
     return [c for c in cols if c in df.columns]
@@ -79,15 +81,31 @@ except Exception as e:
     st.error(f"Деталі: {e}")
     st.stop()
 
+health = api.get_health()
+
 # ================== ACTIVE SHIPS ==================
 active_ships_df = ships_df.copy()
 if "status" in active_ships_df.columns:
     active_ships_df = active_ships_df[active_ships_df["status"] != "departed"].copy()
 
 # ================== HEADER ==================
-st.title("🚢 Fleet Manager Dashboard")
-st.markdown("Огляд стану портів, флоту, екіпажу та компаній.")
+with st.container():
+    st.markdown(
+        f"""
+        <div class="fm-hero">
+            <h1>🚢 Fleet Manager Dashboard</h1>
+            <p>Контролюй флот, людей і лог у єдиному вікні.</p>
+            <div style="display:flex; gap:0.6rem; flex-wrap: wrap;">
+                <span class="fm-chip">Backend: {"🟢 OK" if health else "🔴 Немає доступу"}</span>
+                <span class="fm-chip">База даних: локальна SQLite</span>
+                <span class="fm-chip">Оновлення даних кешу: 3–15 c TTL</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
+st.markdown("")
 c1, c2, c3, c4, c5 = st.columns(5)
 c1.metric("⚓ Порти", len(ports_df))
 c2.metric("📋 Типи кораблів", len(types_df))
@@ -128,11 +146,6 @@ with col_info:
     sel_port_row = ports_df[ports_df["name"] == selected_port_name].iloc[0]
     sel_port_id = int(sel_port_row.get("id", 0))
 
-    st.caption(
-        f"Обраний порт: **{selected_port_name}** "
-        f"(id={sel_port_id}, регіон: {sel_port_row.get('region', '')})"
-    )
-
     ships_in_port = pd.DataFrame()
     if {"port_id", "id"}.issubset(active_ships_df.columns):
         ships_in_port = active_ships_df[active_ships_df["port_id"] == sel_port_id].copy()
@@ -149,6 +162,20 @@ with col_info:
         ids = [cid for cid in ids if isinstance(cid, int) and cid > 0]
         if ids:
             companies_in_port = companies_df[companies_df["id"].isin(ids)].copy()
+
+    cA, cB, cC = st.columns(3)
+    cA.metric("Кораблів у порту", len(ships_in_port))
+    cB.metric("Компаній у порту", len(companies_in_port))
+    if not ships_in_port.empty and "status" in ships_in_port.columns:
+        top_status = ships_in_port["status"].mode()[0] if not ships_in_port.empty else "—"
+        cC.metric("Найчастіший статус", top_status)
+    else:
+        cC.metric("Найчастіший статус", "—")
+
+    st.caption(
+        f"Обраний порт: **{selected_port_name}** "
+        f"(id={sel_port_id}, регіон: {sel_port_row.get('region', '')})"
+    )
 
     tab = api.sticky_tabs(
         ["🚢 Кораблі в цьому порту", "🏢 Компанії в порту", "🌍 Всі кораблі"],

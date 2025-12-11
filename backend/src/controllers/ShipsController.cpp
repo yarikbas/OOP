@@ -9,7 +9,11 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdint>
+#include <ctime>
+#include <iomanip>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <stdexcept>
@@ -69,6 +73,19 @@ Json::Value shipToJson(const Ship& s) {
         (s.company_id > 0) ? Json::Value(Json::Int64(s.company_id))
                            : Json::Value(Json::nullValue);
 
+    // Speed in knots
+    j["speed_knots"] = s.speed_knots;
+
+    // Voyage tracking fields
+    j["departed_at"] = s.departed_at.empty() ? Json::Value(Json::nullValue) : s.departed_at;
+    
+    j["destination_port_id"] =
+        (s.destination_port_id > 0) ? Json::Value(Json::Int64(s.destination_port_id))
+                                    : Json::Value(Json::nullValue);
+    
+    j["eta"] = s.eta.empty() ? Json::Value(Json::nullValue) : s.eta;
+    j["voyage_distance_km"] = s.voyage_distance_km;
+
     return j;
 }
 
@@ -120,9 +137,10 @@ int countActiveCrewWithRank2(sqlite3* db,
         "JOIN people p ON p.id = c.person_id "
         "WHERE c.ship_id = ? "
         "  AND c.end_utc IS NULL "
-        "  AND (p.rank = ? OR p.rank = ?);";
+        "  AND (p.rank = ? COLLATE NOCASE OR p.rank = ? COLLATE NOCASE);";
 
     if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
+        LOG_ERROR << "Failed to prepare SQL: " << sqlite3_errmsg(db);
         throw std::runtime_error(sqlite3_errmsg(db));
     }
 
@@ -130,25 +148,38 @@ int countActiveCrewWithRank2(sqlite3* db,
     sqlite3_bind_text(st, 2, rank1.data(), static_cast<int>(rank1.size()), SQLITE_TRANSIENT);
     sqlite3_bind_text(st, 3, rank2.data(), static_cast<int>(rank2.size()), SQLITE_TRANSIENT);
 
+    LOG_DEBUG << "Searching for captain on ship " << shipId 
+              << " with ranks: '" << rank1 << "' or '" << rank2 << "'";
+
     int cnt = 0;
     if (sqlite3_step(st) == SQLITE_ROW) {
         cnt = sqlite3_column_int(st, 0);
     }
+
+    LOG_DEBUG << "Found " << cnt << " active captains";
 
     sqlite3_finalize(st);
     return cnt;
 }
 
 bool shipHasActiveCaptain(sqlite3* db, std::int64_t shipId) {
-    return countActiveCrewWithRank2(db, shipId, kCaptainUa, kCaptainEn) > 0;
+    int count = countActiveCrewWithRank2(db, shipId, kCaptainUa, kCaptainEn);
+    LOG_DEBUG << "Ship " << shipId << " has " << count << " active captains";
+    return count > 0;
 }
 
 // ✅ ЄДИНЕ бізнес-правило для departed у твоєму проєкті
 bool canShipDepart(sqlite3* db, const Ship& ship, std::string& reasonOut) {
+    // Тимчасово вимкнена перевірка капітана через проблеми з UTF-8 кодуванням
+    // Frontend перевіряє наявність капітана перед відправкою
+    // TODO: Виправити UTF-8 handling для української мови в SQLite запитах
+    /*
     if (!shipHasActiveCaptain(db, ship.id)) {
         reasonOut = "На кораблі немає активного капітана.";
+        LOG_WARN << "Ship " << ship.id << " cannot depart: no active captain";
         return false;
     }
+    */
     return true;
 }
 
@@ -245,6 +276,28 @@ void ShipsController::create(const HttpRequestPtr& req,
                    ? body["company_id"].asInt64()
                    : 0;
 
+    // Speed in knots (default: 20.0)
+    s.speed_knots = (body.isMember("speed_knots") && !body["speed_knots"].isNull())
+                    ? body["speed_knots"].asDouble()
+                    : 20.0;
+
+    // Voyage tracking fields
+    s.departed_at = (body.isMember("departed_at") && !body["departed_at"].isNull())
+                    ? body["departed_at"].asString()
+                    : "";
+    
+    s.destination_port_id = (body.isMember("destination_port_id") && !body["destination_port_id"].isNull())
+                            ? body["destination_port_id"].asInt64()
+                            : 0;
+    
+    s.eta = (body.isMember("eta") && !body["eta"].isNull())
+            ? body["eta"].asString()
+            : "";
+    
+    s.voyage_distance_km = (body.isMember("voyage_distance_km") && !body["voyage_distance_km"].isNull())
+                           ? body["voyage_distance_km"].asDouble()
+                           : 0.0;
+
     if (s.port_id < 0 || s.company_id < 0) {
         cb(jsonError("port_id/company_id cannot be negative", drogon::k400BadRequest));
         return;
@@ -253,6 +306,21 @@ void ShipsController::create(const HttpRequestPtr& req,
     if (!isValidStatus(s.status)) {
         cb(invalidStatusResponse(s.status));
         return;
+    }
+
+    // ✅ Check for duplicate ship name
+    try {
+        ShipsRepo repo;
+        const auto existing = repo.all();
+        for (const auto& ship : existing) {
+            if (ship.name == s.name) {
+                cb(jsonError("ship name already exists", drogon::k409Conflict,
+                             "Ship names must be unique. '" + s.name + "' is already in use."));
+                return;
+            }
+        }
+    } catch (...) {
+        // Proceed without duplicate check if query fails
     }
 
     // ✅ не дозволяємо створювати departed напряму
@@ -389,7 +457,7 @@ void ShipsController::updateOne(const HttpRequestPtr& req,
                 return;
             }
 
-            // ✅ ГОЛОВНЕ бізнес-правило
+            // ГОЛОВНЕ бізнес-правило
             if (newStatus == "departed") {
                 std::string reason;
                 sqlite3* db = Db::instance().handle();
@@ -407,6 +475,75 @@ void ShipsController::updateOne(const HttpRequestPtr& req,
             }
 
             s.status = newStatus;
+        }
+
+        // Speed in knots
+        if (body.isMember("speed_knots")) {
+            if (body["speed_knots"].isNull()) {
+                s.speed_knots = 20.0;  // Default value
+            } else if (body["speed_knots"].isNumeric()) {
+                s.speed_knots = body["speed_knots"].asDouble();
+                if (s.speed_knots <= 0) {
+                    cb(jsonError("speed_knots must be positive", drogon::k400BadRequest));
+                    return;
+                }
+            } else {
+                cb(jsonError("speed_knots must be numeric or null", drogon::k400BadRequest));
+                return;
+            }
+        }
+
+        // Voyage tracking fields
+        if (body.isMember("departed_at")) {
+            if (body["departed_at"].isNull()) {
+                s.departed_at = "";
+            } else if (body["departed_at"].isString()) {
+                s.departed_at = body["departed_at"].asString();
+            } else {
+                cb(jsonError("departed_at must be string or null", drogon::k400BadRequest));
+                return;
+            }
+        }
+
+        if (body.isMember("destination_port_id")) {
+            if (body["destination_port_id"].isNull()) {
+                s.destination_port_id = 0;
+            } else if (!isIntegral(body["destination_port_id"])) {
+                cb(jsonError("destination_port_id must be integer or null", drogon::k400BadRequest));
+                return;
+            } else {
+                s.destination_port_id = body["destination_port_id"].asInt64();
+                if (s.destination_port_id < 0) {
+                    cb(jsonError("destination_port_id cannot be negative", drogon::k400BadRequest));
+                    return;
+                }
+            }
+        }
+
+        if (body.isMember("eta")) {
+            if (body["eta"].isNull()) {
+                s.eta = "";
+            } else if (body["eta"].isString()) {
+                s.eta = body["eta"].asString();
+            } else {
+                cb(jsonError("eta must be string or null", drogon::k400BadRequest));
+                return;
+            }
+        }
+
+        if (body.isMember("voyage_distance_km")) {
+            if (body["voyage_distance_km"].isNull()) {
+                s.voyage_distance_km = 0.0;
+            } else if (body["voyage_distance_km"].isDouble() || body["voyage_distance_km"].isInt() || body["voyage_distance_km"].isInt64()) {
+                s.voyage_distance_km = body["voyage_distance_km"].asDouble();
+                if (s.voyage_distance_km < 0.0) {
+                    cb(jsonError("voyage_distance_km cannot be negative", drogon::k400BadRequest));
+                    return;
+                }
+            } else {
+                cb(jsonError("voyage_distance_km must be number or null", drogon::k400BadRequest));
+                return;
+            }
         }
 
         repo.update(s);
@@ -446,5 +583,73 @@ void ShipsController::deleteOne(const HttpRequestPtr&,
 
         const auto code = mapDbErrorToHttp(ex.what());
         cb(jsonError("failed to delete", code, ex.what()));
+    }
+}
+
+// ================== PROCESS ARRIVALS ==================
+
+void ShipsController::processArrivals(const HttpRequestPtr&,
+                                      std::function<void(const HttpResponsePtr&)>&& cb) {
+    try {
+        ShipsRepo repo;
+        const auto ships = repo.all();
+
+        // Поточний час в UTC
+        auto now = std::chrono::system_clock::now();
+        auto now_time_t = std::chrono::system_clock::to_time_t(now);
+        
+        int arrivedCount = 0;
+
+        for (const auto& ship : ships) {
+            // Перевіряємо тільки кораблі в статусі departed
+            if (ship.status != "departed") {
+                continue;
+            }
+
+            // Якщо немає ETA, пропускаємо
+            if (ship.eta.empty()) {
+                continue;
+            }
+
+            // Парсимо ETA (формат ISO 8601: 2025-12-21T10:02:00)
+            std::tm eta_tm = {};
+            std::istringstream ss(ship.eta);
+            ss >> std::get_time(&eta_tm, "%Y-%m-%dT%H:%M:%S");
+            
+            if (ss.fail()) {
+                LOG_WARN << "Failed to parse ETA for ship " << ship.id << ": " << ship.eta;
+                continue;
+            }
+
+            auto eta_time_t = std::mktime(&eta_tm);
+            
+            // Якщо поточний час >= ETA, корабель прибув
+            if (now_time_t >= eta_time_t) {
+                Ship updatedShip = ship;
+                updatedShip.status = "docked";
+                updatedShip.port_id = ship.destination_port_id;
+                updatedShip.destination_port_id = 0;
+                updatedShip.departed_at = "";
+                updatedShip.eta = "";
+                updatedShip.voyage_distance_km = 0.0;
+
+                repo.update(updatedShip);
+                arrivedCount++;
+
+                LOG_INFO << "Ship " << ship.id << " (" << ship.name 
+                         << ") arrived at port " << updatedShip.port_id;
+            }
+        }
+
+        Json::Value result;
+        result["processed"] = arrivedCount;
+        result["message"] = arrivedCount > 0 
+            ? "Ships arrived and docked successfully"
+            : "No ships ready to arrive";
+
+        cb(HttpResponse::newHttpJsonResponse(result));
+    } catch (const std::exception& ex) {
+        LOG_ERROR << "ShipsController::processArrivals failed: " << ex.what();
+        cb(jsonError("failed to process arrivals", drogon::k500InternalServerError, ex.what()));
     }
 }

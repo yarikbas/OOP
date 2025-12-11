@@ -6,7 +6,6 @@
 #include <string>
 #include <vector>
 
-// ✅ Модель тут, бо окремого файла немає
 struct CrewAssignment {
     std::int64_t id{0};
     std::int64_t person_id{0};
@@ -23,7 +22,7 @@ public:
                                          long long shipId,
                                          const std::string& startUtc);
 
-    // ✅ для тестів
+    // для тестів
     bool end(long long assignmentId);
     bool end(long long assignmentId, const std::string& endUtc);
 

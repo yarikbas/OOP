@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <string>
 #include <iostream>
+#include <ctime>
 
 namespace {
 
@@ -218,6 +219,13 @@ void Db::runMigrations() {
     ensureColumn(db_, "ships", "port_id", "INTEGER");
     ensureColumn(db_, "ships", "status", "TEXT NOT NULL DEFAULT 'docked'");
     ensureColumn(db_, "ships", "company_id", "INTEGER");
+    ensureColumn(db_, "ships", "speed_knots", "REAL NOT NULL DEFAULT 20.0");
+    
+    // Voyage tracking columns
+    ensureColumn(db_, "ships", "departed_at", "TEXT");
+    ensureColumn(db_, "ships", "destination_port_id", "INTEGER");
+    ensureColumn(db_, "ships", "eta", "TEXT");
+    ensureColumn(db_, "ships", "voyage_distance_km", "REAL");
 
     execOrThrow(db_, "CREATE INDEX IF NOT EXISTS idx_ships_company ON ships(company_id);");
     execOrThrow(db_, "CREATE INDEX IF NOT EXISTS idx_ships_port ON ships(port_id);");
@@ -265,13 +273,13 @@ void Db::runMigrations() {
     // Якщо раніше був не-unique індекс
     execOrThrow(db_, "DROP INDEX IF EXISTS idx_crew_ship_active;");
 
-    // ✅ 1 активне призначення на корабель
+    // 1 активне призначення на корабель
     execOrThrow(db_,
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_crew_ship_active "
         "ON crew_assignments(ship_id) WHERE end_utc IS NULL;"
     );
 
-    // ✅ 1 активне призначення на людину
+    // 1 активне призначення на людину
     execOrThrow(db_,
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_crew_person_active "
         "ON crew_assignments(person_id) WHERE end_utc IS NULL;"
@@ -285,6 +293,166 @@ void Db::runMigrations() {
         seedPortsIfEmpty(db_);
         seedShipsIfEmpty(db_);
     }
+
+    // --- CARGO ---
+    execOrThrow(db_,
+        "CREATE TABLE IF NOT EXISTS cargo ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  name TEXT NOT NULL,"
+        "  type TEXT NOT NULL,"
+        "  weight_tonnes REAL DEFAULT 0,"
+        "  volume_m3 REAL DEFAULT 0,"
+        "  value_usd REAL DEFAULT 0,"
+        "  origin_port_id INTEGER,"
+        "  destination_port_id INTEGER,"
+        "  status TEXT DEFAULT 'pending',"
+        "  ship_id INTEGER,"
+        "  loaded_at TEXT,"
+        "  delivered_at TEXT,"
+        "  notes TEXT,"
+        "  FOREIGN KEY(origin_port_id) REFERENCES ports(id),"
+        "  FOREIGN KEY(destination_port_id) REFERENCES ports(id),"
+        "  FOREIGN KEY(ship_id) REFERENCES ships(id)"
+        ");"
+    );
+    execOrThrow(db_, "CREATE INDEX IF NOT EXISTS idx_cargo_ship ON cargo(ship_id);");
+    execOrThrow(db_, "CREATE INDEX IF NOT EXISTS idx_cargo_status ON cargo(status);");
+
+    // --- VOYAGE RECORDS ---
+    execOrThrow(db_,
+        "CREATE TABLE IF NOT EXISTS voyage_records ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  ship_id INTEGER NOT NULL,"
+        "  from_port_id INTEGER NOT NULL,"
+        "  to_port_id INTEGER NOT NULL,"
+        "  departed_at TEXT NOT NULL,"
+        "  arrived_at TEXT,"
+        "  actual_duration_hours REAL DEFAULT 0,"
+        "  planned_duration_hours REAL DEFAULT 0,"
+        "  distance_km REAL DEFAULT 0,"
+        "  fuel_consumed_tonnes REAL DEFAULT 0,"
+        "  total_cost_usd REAL DEFAULT 0,"
+        "  total_revenue_usd REAL DEFAULT 0,"
+        "  cargo_list TEXT,"
+        "  crew_list TEXT,"
+        "  notes TEXT,"
+        "  weather_conditions TEXT,"
+        "  FOREIGN KEY(ship_id) REFERENCES ships(id),"
+        "  FOREIGN KEY(from_port_id) REFERENCES ports(id),"
+        "  FOREIGN KEY(to_port_id) REFERENCES ports(id)"
+        ");"
+    );
+    execOrThrow(db_, "CREATE INDEX IF NOT EXISTS idx_voyage_ship ON voyage_records(ship_id);");
+    execOrThrow(db_, "CREATE INDEX IF NOT EXISTS idx_voyage_dates ON voyage_records(departed_at, arrived_at);");
+
+    // --- VOYAGE EXPENSES ---
+    execOrThrow(db_,
+        "CREATE TABLE IF NOT EXISTS voyage_expenses ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  voyage_id INTEGER NOT NULL,"
+        "  fuel_cost_usd REAL DEFAULT 0,"
+        "  port_fees_usd REAL DEFAULT 0,"
+        "  crew_wages_usd REAL DEFAULT 0,"
+        "  maintenance_cost_usd REAL DEFAULT 0,"
+        "  other_costs_usd REAL DEFAULT 0,"
+        "  total_cost_usd REAL DEFAULT 0,"
+        "  notes TEXT,"
+        "  FOREIGN KEY(voyage_id) REFERENCES voyage_records(id) ON DELETE CASCADE"
+        ");"
+    );
+    execOrThrow(db_, "CREATE INDEX IF NOT EXISTS idx_expenses_voyage ON voyage_expenses(voyage_id);");
+
+    // --- SCHEDULES ---
+    execOrThrow(db_,
+        "CREATE TABLE IF NOT EXISTS schedules ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  ship_id INTEGER NOT NULL,"
+        "  route_name TEXT NOT NULL,"
+        "  from_port_id INTEGER NOT NULL,"
+        "  to_port_id INTEGER NOT NULL,"
+        "  departure_day_of_week INTEGER DEFAULT 1,"
+        "  departure_time TEXT,"
+        "  is_active INTEGER DEFAULT 1,"
+        "  recurring TEXT DEFAULT 'weekly',"
+        "  notes TEXT,"
+        "  FOREIGN KEY(ship_id) REFERENCES ships(id),"
+        "  FOREIGN KEY(from_port_id) REFERENCES ports(id),"
+        "  FOREIGN KEY(to_port_id) REFERENCES ports(id)"
+        ");"
+    );
+    execOrThrow(db_, "CREATE INDEX IF NOT EXISTS idx_schedules_ship ON schedules(ship_id);");
+    execOrThrow(db_, "CREATE INDEX IF NOT EXISTS idx_schedules_active ON schedules(is_active);");
+
+    // --- WEATHER DATA ---
+    execOrThrow(db_,
+        "CREATE TABLE IF NOT EXISTS weather_data ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  port_id INTEGER NOT NULL,"
+        "  timestamp TEXT NOT NULL,"
+        "  temperature_c REAL DEFAULT 0,"
+        "  wind_speed_kmh REAL DEFAULT 0,"
+        "  wind_direction_deg REAL DEFAULT 0,"
+        "  conditions TEXT,"
+        "  visibility_km REAL DEFAULT 10,"
+        "  wave_height_m REAL DEFAULT 0,"
+        "  warnings TEXT,"
+        "  FOREIGN KEY(port_id) REFERENCES ports(id)"
+        ");"
+    );
+    execOrThrow(db_, "CREATE INDEX IF NOT EXISTS idx_weather_port ON weather_data(port_id);");
+    execOrThrow(db_, "CREATE INDEX IF NOT EXISTS idx_weather_timestamp ON weather_data(timestamp);");
+
+    // --- LOGS ---
+    execOrThrow(db_,
+        "CREATE TABLE IF NOT EXISTS logs ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  ts TEXT NOT NULL,"
+        "  level TEXT NOT NULL,"
+        "  event_type TEXT NOT NULL,"
+        "  entity TEXT,"
+        "  entity_id INTEGER,"
+        "  user TEXT,"
+        "  message TEXT"
+        ");"
+    );
+
+    execOrThrow(db_, "CREATE INDEX IF NOT EXISTS idx_logs_event_type ON logs(event_type);");
+    execOrThrow(db_, "CREATE INDEX IF NOT EXISTS idx_logs_ts ON logs(ts);");
+}
+
+void Db::insertLog(const std::string& level,
+                   const std::string& event_type,
+                   const std::string& entity,
+                   int entity_id,
+                   const std::string& user,
+                   const std::string& message) {
+    const char* sql = "INSERT INTO logs(ts, level, event_type, entity, entity_id, user, message) VALUES (?, ?, ?, ?, ?, ?, ?);";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+        throw std::runtime_error(sqlite3_errmsg(db_));
+    }
+
+    // timestamp UTC ISO-8601
+    std::time_t t = std::time(nullptr);
+    std::tm tm = *std::gmtime(&t);
+    char buf[32];
+    std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tm);
+    const std::string ts(buf);
+
+    sqlite3_bind_text(st, 1, ts.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, level.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 3, event_type.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 4, entity.c_str(), -1, SQLITE_TRANSIENT);
+    if (entity_id > 0) sqlite3_bind_int(st, 5, entity_id); else sqlite3_bind_null(st, 5);
+    sqlite3_bind_text(st, 6, user.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 7, message.c_str(), -1, SQLITE_TRANSIENT);
+
+    if (sqlite3_step(st) != SQLITE_DONE) {
+        std::string err = sqlite3_errmsg(db_);
+        sqlite3_finalize(st);
+        throw std::runtime_error("log insert failed: " + err);
+    }
+    sqlite3_finalize(st);
 }
 
 void Db::reset() {

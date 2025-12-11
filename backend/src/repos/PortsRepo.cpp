@@ -98,6 +98,11 @@ Port PortsRepo::create(const Port& in) const {
 
     Port out = in;
     out.id = sqlite3_last_insert_rowid(db_);
+
+    try {
+        std::string msg = "Created port '" + out.name + "' (id=" + std::to_string(out.id) + ")";
+        Db::instance().insertLog("AUDIT", "port.create", "port", (int)out.id, "system", msg);
+    } catch (...) {}
     return out;
 }
 
@@ -141,9 +146,12 @@ bool PortsRepo::update(const Port& p) const {
         throw std::runtime_error(std::string("PortsRepo::update failed: ") + sqlite3_errmsg(db_));
     }
 
-    // Важливо для CRUD:
-    // Контролер уже перевіряє існування порту.
-    // Тому "нічого не змінилось" не має трактуватися як помилка.
+    try {
+        std::string msg = "Updated port id=" + std::to_string(p.id) + " name='" + p.name + "'";
+        Db::instance().insertLog("AUDIT", "port.update", "port", (int)p.id, "system", msg);
+    } catch (...) {}
+
+    // Контролер вже перевіряє існування порту; повертаємо true
     return true;
 }
 
@@ -159,12 +167,15 @@ bool PortsRepo::remove(int64_t id) const {
 
     const int rc = sqlite3_step(st.get());
     if (rc != SQLITE_DONE) {
-        // Важливо: FK/UNIQUE/інші constraint-и мають підняти виняток,
-        // щоб контролер міг повернути коректний HTTP (409/400),
-        // а не маскувати це як "not found".
         throw std::runtime_error(std::string("PortsRepo::remove failed: ") + sqlite3_errmsg(db_));
     }
 
-    // false = реально не знайдено
-    return sqlite3_changes(db_) > 0;
+    const bool changed = sqlite3_changes(db_) > 0;
+    if (changed) {
+        try {
+            std::string msg = "Deleted port id=" + std::to_string(id);
+            Db::instance().insertLog("AUDIT", "port.delete", "port", (int)id, "system", msg);
+        } catch (...) {}
+    }
+    return changed;
 }

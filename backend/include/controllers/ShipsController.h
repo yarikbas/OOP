@@ -14,6 +14,7 @@ public:
         ADD_METHOD_TO(ShipsController::getOne,    "/api/ships/{1}", drogon::Get);
         ADD_METHOD_TO(ShipsController::updateOne, "/api/ships/{1}", drogon::Put);
         ADD_METHOD_TO(ShipsController::deleteOne, "/api/ships/{1}", drogon::Delete);
+        ADD_METHOD_TO(ShipsController::processArrivals, "/api/ships/process-arrivals", drogon::Post);
     METHOD_LIST_END
 
     void list     (const drogon::HttpRequestPtr& req, Callback&& cb);
@@ -21,4 +22,5 @@ public:
     void getOne   (const drogon::HttpRequestPtr& req, Callback&& cb, std::int64_t id);
     void updateOne(const drogon::HttpRequestPtr& req, Callback&& cb, std::int64_t id);
     void deleteOne(const drogon::HttpRequestPtr& req, Callback&& cb, std::int64_t id);
+    void processArrivals(const drogon::HttpRequestPtr& req, Callback&& cb);
 };

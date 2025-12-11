@@ -127,10 +127,15 @@ Company CompaniesRepo::create(const std::string& name) {
     const std::int64_t id = sqlite3_last_insert_rowid(db);
     auto c = byId(id);
     if (!c) throw std::runtime_error("insert ok but fetch failed");
+
+    try {
+        std::string msg = "Created company '" + name + "' (id=" + std::to_string(id) + ")";
+        Db::instance().insertLog("AUDIT", "company.create", "company", (int)id, "system", msg);
+    } catch (...) {}
     return *c;
 }
 
-// ✅ overload під тести
+// overload під тести
 Company CompaniesRepo::create(const Company& c) {
     return create(c.name);
 }
@@ -148,7 +153,15 @@ bool CompaniesRepo::update(std::int64_t id, const std::string& name) {
         throw std::runtime_error(std::string("update company failed: ") + sqlite3_errmsg(db));
     }
 
-    return sqlite3_changes(db) > 0;
+    const bool changed = sqlite3_changes(db) > 0;
+    if (changed) {
+        try {
+            std::string msg = "Updated company id=" + std::to_string(id) + " name='" + name + "'";
+            Db::instance().insertLog("AUDIT", "company.update", "company", (int)id, "system", msg);
+        } catch (...) {}
+    }
+
+    return changed;
 }
 
 // ✅ overload під тести
@@ -168,7 +181,15 @@ bool CompaniesRepo::remove(std::int64_t id) {
         throw std::runtime_error(std::string("delete company failed: ") + sqlite3_errmsg(db));
     }
 
-    return sqlite3_changes(db) > 0;
+    const bool changed = sqlite3_changes(db) > 0;
+    if (changed) {
+        try {
+            std::string msg = "Deleted company id=" + std::to_string(id);
+            Db::instance().insertLog("AUDIT", "company.delete", "company", (int)id, "system", msg);
+        } catch (...) {}
+    }
+
+    return changed;
 }
 
 // ---- company ↔ ports -------------------------------------------
@@ -232,6 +253,10 @@ bool CompaniesRepo::addPort(std::int64_t companyId, std::int64_t portId, bool is
         if (isMain) {
             execSimple(db, "COMMIT;");
         }
+        try {
+            std::string msg = "Added port_id=" + std::to_string(portId) + " to company_id=" + std::to_string(companyId) + (isMain ? " (main)" : "");
+            Db::instance().insertLog("AUDIT", "company.add_port", "company", (int)companyId, "system", msg);
+        } catch (...) {}
         return true;
     } catch (...) {
         if (isMain) {
@@ -254,8 +279,14 @@ bool CompaniesRepo::removePort(std::int64_t companyId, std::int64_t portId) {
     if (sqlite3_step(st.get()) != SQLITE_DONE) {
         throw std::runtime_error(std::string("remove port failed: ") + sqlite3_errmsg(db));
     }
-
-    return sqlite3_changes(db) > 0;
+    const bool changed = sqlite3_changes(db) > 0;
+    if (changed) {
+        try {
+            std::string msg = "Removed port_id=" + std::to_string(portId) + " from company_id=" + std::to_string(companyId);
+            Db::instance().insertLog("AUDIT", "company.remove_port", "company", (int)companyId, "system", msg);
+        } catch (...) {}
+    }
+    return changed;
 }
 
 // ---- company ↔ ships -------------------------------------------

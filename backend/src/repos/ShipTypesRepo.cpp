@@ -126,6 +126,11 @@ ShipType ShipTypesRepo::create(const ShipType& t) {
     const auto id = sqlite3_last_insert_rowid(db);
     auto got = byId(id);
     if (!got) throw std::runtime_error("ShipTypesRepo::create ok but fetch failed");
+
+    try {
+        std::string msg = "Created ship type '" + t.name + "' (id=" + std::to_string(id) + ")";
+        Db::instance().insertLog("AUDIT", "ship_type.create", "ship_type", (int)id, "system", msg);
+    } catch (...) {}
     return *got;
 }
 
@@ -148,6 +153,11 @@ void ShipTypesRepo::update(const ShipType& t) {
         throw std::runtime_error(std::string("ShipTypesRepo::update failed: ")
                                  + sqlite3_errmsg(db));
     }
+
+    try {
+        std::string msg = "Updated ship_type id=" + std::to_string(t.id) + " name='" + t.name + "'";
+        Db::instance().insertLog("AUDIT", "ship_type.update", "ship_type", (int)t.id, "system", msg);
+    } catch (...) {}
 }
 
 void ShipTypesRepo::remove(long long id) {
@@ -164,4 +174,9 @@ void ShipTypesRepo::remove(long long id) {
         throw std::runtime_error(std::string("ShipTypesRepo::remove failed: ")
                                  + sqlite3_errmsg(db));
     }
+
+    try {
+        std::string msg = "Deleted ship_type id=" + std::to_string(id);
+        Db::instance().insertLog("AUDIT", "ship_type.delete", "ship_type", (int)id, "system", msg);
+    } catch (...) {}
 }

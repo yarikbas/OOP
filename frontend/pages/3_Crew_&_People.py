@@ -6,7 +6,19 @@ import common as api
 from datetime import datetime, timezone
 
 st.set_page_config(page_title="Crew & People", page_icon="🧑‍✈️", layout="wide")
-st.title("🧑‍✈️ Управління Екіпажем та Персоналом")
+api.inject_theme()
+
+# Sidebar identity and health
+st.sidebar.title("🚢 Fleet Manager")
+st.sidebar.caption("Crew & People")
+from common import get_health
+_h = get_health()
+
+
+# Center title
+col_l, col_c, col_r = st.columns([1, 3, 1])
+with col_c:
+    st.title("🧑‍✈️ Управління Екіпажем та Персоналом")
 
 
 # ================== UI HELPERS ==================
@@ -237,6 +249,35 @@ elif tab == "👤 Управління Персоналом (CRUD)":
 
         people_view = people_df.copy()
 
+        # -------- Фільтри --------
+        with st.expander("Фільтри та пошук", expanded=True):
+            c1, c2, c3, c4 = st.columns([1.6, 1, 1, 1])
+            q = c1.text_input("Пошук за ім'ям", placeholder="John / Jane", key="people_search")
+
+            if "people_rank_flt" not in st.session_state:
+                st.session_state["people_rank_flt"] = []
+            rank_flt = c2.multiselect("Професія", PROF_LABELS, key="people_rank_flt")
+
+            active_only = c3.checkbox("Лише активні", value=False, key="people_active_only")
+            assigned_only = c4.checkbox("Лише з кораблем", value=False, key="people_assigned_only")
+
+            if st.button("Очистити фільтри", key="people_clear_filters"):
+                for k in ["people_search", "people_rank_flt", "people_active_only", "people_assigned_only"]:
+                    st.session_state.pop(k, None)
+                st.experimental_rerun()
+
+        # Normalise rank for filtering/display
+        if "rank" in people_view.columns:
+            people_view["rank_ui"] = people_view["rank"].map(lambda r: rank_to_ui_label(str(r)))
+
+        # Apply filters
+        if q and "full_name" in people_view.columns:
+            people_view = people_view[people_view["full_name"].astype(str).str.contains(q, case=False, na=False)]
+        if rank_flt and "rank_ui" in people_view.columns:
+            people_view = people_view[people_view["rank_ui"].isin(rank_flt)]
+        if active_only and "active" in people_view.columns:
+            people_view = people_view[people_view["active"] == True]
+
         if not people_view.empty and "id" in people_view.columns:
             def current_ship_label(person_id):
                 try:
@@ -250,20 +291,28 @@ elif tab == "👤 Управління Персоналом (CRUD)":
 
             people_view["current_ship"] = people_view["id"].map(current_ship_label)
 
-            if "rank" in people_view.columns:
-                people_view["rank"] = people_view["rank"].map(
-                    lambda r: rank_to_ui_label(str(r))
-                )
+            if assigned_only:
+                people_view = people_view[people_view["current_ship"].fillna("") != ""]
+
+            if "rank_ui" in people_view.columns:
+                people_view["rank"] = people_view["rank_ui"]
 
             cols_order = []
             for col in ["id", "full_name", "rank", "active", "current_ship"]:
                 if col in people_view.columns:
                     cols_order.append(col)
             for col in people_view.columns:
-                if col not in cols_order:
+                if col not in cols_order and col != "rank_ui":
                     cols_order.append(col)
 
             people_view = people_view[cols_order]
+
+        # KPI chips
+        cA, cB, cC = st.columns(3)
+        cA.metric("Людей у вибірці", len(people_view))
+        if "active" in people_view.columns:
+            cB.metric("Активні", int((people_view["active"] == True).sum()))
+        cC.metric("З кораблем", int(people_view["current_ship"].notna().sum()) if "current_ship" in people_view.columns else 0)
 
         df_stretch(api.df_1based(people_view))
 

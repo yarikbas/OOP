@@ -49,6 +49,11 @@ Ship parseShip(sqlite3_stmt* st) {
     s.port_id    = sqlite3_column_int64(st, 4); // якщо NULL -> 0 (OK як sentinel)
     s.status     = safe_text(st, 5);
     s.company_id = sqlite3_column_int64(st, 6); // якщо NULL -> 0
+    s.speed_knots = sqlite3_column_double(st, 7);
+    s.departed_at = safe_text(st, 8);
+    s.destination_port_id = sqlite3_column_int64(st, 9);
+    s.eta = safe_text(st, 10);
+    s.voyage_distance_km = sqlite3_column_double(st, 11);
     return s;
 }
 
@@ -68,7 +73,9 @@ std::vector<Ship> ShipsRepo::all() {
     sqlite3* db = Db::instance().handle();
 
     const char* sql =
-        "SELECT id,name,type,country,port_id,status,IFNULL(company_id,0) "
+        "SELECT id,name,type,country,port_id,status,IFNULL(company_id,0),"
+        "IFNULL(speed_knots,20.0),"
+        "departed_at,IFNULL(destination_port_id,0),eta,IFNULL(voyage_distance_km,0) "
         "FROM ships "
         "ORDER BY id";
 
@@ -88,7 +95,9 @@ std::vector<Ship> ShipsRepo::getByPortId(long long portId) {
     sqlite3* db = Db::instance().handle();
 
     const char* sql =
-        "SELECT id,name,type,country,port_id,status,IFNULL(company_id,0) "
+        "SELECT id,name,type,country,port_id,status,IFNULL(company_id,0),"
+        "IFNULL(speed_knots,20.0),"
+        "departed_at,IFNULL(destination_port_id,0),eta,IFNULL(voyage_distance_km,0) "
         "FROM ships "
         "WHERE port_id=? "
         "ORDER BY id";
@@ -110,7 +119,9 @@ std::optional<Ship> ShipsRepo::byId(long long id) {
     sqlite3* db = Db::instance().handle();
 
     const char* sql =
-        "SELECT id,name,type,country,port_id,status,IFNULL(company_id,0) "
+        "SELECT id,name,type,country,port_id,status,IFNULL(company_id,0),"
+        "IFNULL(speed_knots,20.0),"
+        "departed_at,IFNULL(destination_port_id,0),eta,IFNULL(voyage_distance_km,0) "
         "FROM ships "
         "WHERE id=?";
 
@@ -130,8 +141,9 @@ Ship ShipsRepo::create(const Ship& sIn) {
     sqlite3* db = Db::instance().handle();
 
     const char* sql =
-        "INSERT INTO ships(name, type, country, port_id, status, company_id) "
-        "VALUES(?,?,?,?,?,?);";
+        "INSERT INTO ships(name, type, country, port_id, status, company_id, speed_knots, "
+        "departed_at, destination_port_id, eta, voyage_distance_km) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?);";
 
     Stmt st(db, sql);
 
@@ -147,6 +159,23 @@ Ship ShipsRepo::create(const Ship& sIn) {
     // company_id: 0/не задано -> NULL
     bindNullableInt64(st.get(), 6, static_cast<std::int64_t>(sIn.company_id));
 
+    // speed_knots
+    sqlite3_bind_double(st.get(), 7, sIn.speed_knots);
+
+    // Voyage tracking fields
+    if (sIn.departed_at.empty()) {
+        sqlite3_bind_null(st.get(), 8);
+    } else {
+        sqlite3_bind_text(st.get(), 8, sIn.departed_at.c_str(), -1, SQLITE_TRANSIENT);
+    }
+    bindNullableInt64(st.get(), 9, static_cast<std::int64_t>(sIn.destination_port_id));
+    if (sIn.eta.empty()) {
+        sqlite3_bind_null(st.get(), 10);
+    } else {
+        sqlite3_bind_text(st.get(), 10, sIn.eta.c_str(), -1, SQLITE_TRANSIENT);
+    }
+    sqlite3_bind_double(st.get(), 11, sIn.voyage_distance_km);
+
     const int rc = sqlite3_step(st.get());
     if (rc != SQLITE_DONE) {
         throw std::runtime_error(std::string("ShipsRepo::create failed: ") + sqlite3_errmsg(db));
@@ -154,6 +183,12 @@ Ship ShipsRepo::create(const Ship& sIn) {
 
     Ship out = sIn;
     out.id = sqlite3_last_insert_rowid(db);
+    try {
+        std::string msg = "Created ship id=" + std::to_string(out.id) + " name='" + out.name + "' type='" + out.type + "'";
+        Db::instance().insertLog("INFO", "ship.create", "ship", (int)out.id, "system", msg);
+    } catch (...) {
+        // ignore logging errors
+    }
     return out;
 }
 
@@ -164,7 +199,8 @@ void ShipsRepo::update(const Ship& s) {
 
     const char* sql =
         "UPDATE ships "
-        "SET name = ?, type = ?, country = ?, port_id = ?, status = ?, company_id = ? "
+        "SET name = ?, type = ?, country = ?, port_id = ?, status = ?, company_id = ?, speed_knots = ?, "
+        "departed_at = ?, destination_port_id = ?, eta = ?, voyage_distance_km = ? "
         "WHERE id = ?;";
 
     Stmt st(db, sql);
@@ -179,12 +215,33 @@ void ShipsRepo::update(const Ship& s) {
 
     bindNullableInt64(st.get(), 6, static_cast<std::int64_t>(s.company_id));
 
-    sqlite3_bind_int64(st.get(), 7, static_cast<std::int64_t>(s.id));
+    // speed_knots
+    sqlite3_bind_double(st.get(), 7, s.speed_knots);
+
+    // Voyage tracking fields
+    if (s.departed_at.empty()) {
+        sqlite3_bind_null(st.get(), 8);
+    } else {
+        sqlite3_bind_text(st.get(), 8, s.departed_at.c_str(), -1, SQLITE_TRANSIENT);
+    }
+    bindNullableInt64(st.get(), 9, static_cast<std::int64_t>(s.destination_port_id));
+    if (s.eta.empty()) {
+        sqlite3_bind_null(st.get(), 10);
+    } else {
+        sqlite3_bind_text(st.get(), 10, s.eta.c_str(), -1, SQLITE_TRANSIENT);
+    }
+    sqlite3_bind_double(st.get(), 11, s.voyage_distance_km);
+
+    sqlite3_bind_int64(st.get(), 12, static_cast<std::int64_t>(s.id));
 
     const int rc = sqlite3_step(st.get());
     if (rc != SQLITE_DONE) {
         throw std::runtime_error(std::string("ShipsRepo::update failed: ") + sqlite3_errmsg(db));
     }
+    try {
+        std::string msg = "Updated ship id=" + std::to_string(s.id) + " name='" + s.name + "' status='" + s.status + "'";
+        Db::instance().insertLog("INFO", "ship.update", "ship", (int)s.id, "system", msg);
+    } catch (...) {}
 }
 
 // ===================== REMOVE =====================
@@ -205,4 +262,8 @@ void ShipsRepo::remove(long long id) {
 
     // Семантика "void remove" збережена:
     // якщо id не існує — 0 changes без винятку.
+    try {
+        std::string msg = "Deleted ship id=" + std::to_string(id);
+        Db::instance().insertLog("INFO", "ship.delete", "ship", (int)id, "system", msg);
+    } catch (...) {}
 }

@@ -142,10 +142,10 @@ void ShipTypesController::create(const HttpRequestPtr& req,
 
 void ShipTypesController::getOne(const HttpRequestPtr&,
                                  std::function<void(const HttpResponsePtr&)>&& cb,
-                                 std::int64_t id) {
+                                 const std::string& code) {
     try {
         ShipTypesRepo repo;
-        const auto t = repo.byId(id);
+        const auto t = repo.byCode(code);
 
         if (!t) {
             cb(jsonError("not found", drogon::k404NotFound));
@@ -154,7 +154,7 @@ void ShipTypesController::getOne(const HttpRequestPtr&,
 
         cb(HttpResponse::newHttpJsonResponse(shipTypeToJson(*t)));
     } catch (const std::exception& ex) {
-        LOG_ERROR << "ShipTypesController::getOne failed id=" << id
+        LOG_ERROR << "ShipTypesController::getOne failed code=" << code
                   << ": " << ex.what();
         cb(jsonError("get failed", drogon::k500InternalServerError, ex.what()));
     }
@@ -164,7 +164,7 @@ void ShipTypesController::getOne(const HttpRequestPtr&,
 
 void ShipTypesController::updateOne(const HttpRequestPtr& req,
                                     std::function<void(const HttpResponsePtr&)>&& cb,
-                                    std::int64_t id) {
+                                    const std::string& code) {
     const auto j = req->getJsonObject();
     if (!j) {
         cb(jsonError("json body required", drogon::k400BadRequest));
@@ -178,7 +178,7 @@ void ShipTypesController::updateOne(const HttpRequestPtr& req,
 
     try {
         ShipTypesRepo repo;
-        const auto cur = repo.byId(id);
+        const auto cur = repo.byCode(code);
 
         if (!cur) {
             cb(jsonError("not found", drogon::k404NotFound));
@@ -213,7 +213,7 @@ void ShipTypesController::updateOne(const HttpRequestPtr& req,
 
         cb(jsonOk("updated"));
     } catch (const std::exception& ex) {
-        LOG_ERROR << "ShipTypesController::updateOne failed id=" << id
+        LOG_ERROR << "ShipTypesController::updateOne failed code=" << code
                   << ": " << ex.what();
         cb(jsonError("update failed", mapDbErrorToHttp(ex.what()), ex.what()));
     }
@@ -223,23 +223,23 @@ void ShipTypesController::updateOne(const HttpRequestPtr& req,
 
 void ShipTypesController::deleteOne(const HttpRequestPtr&,
                                     std::function<void(const HttpResponsePtr&)>&& cb,
-                                    std::int64_t id) {
+                                    const std::string& code) {
     try {
         ShipTypesRepo repo;
 
-        const auto cur = repo.byId(id);
+        const auto cur = repo.byCode(code);
         if (!cur) {
             cb(jsonError("not found", drogon::k404NotFound));
             return;
         }
 
-        repo.remove(id);
+        repo.remove(cur->id);
 
         auto r = HttpResponse::newHttpResponse();
         r->setStatusCode(drogon::k204NoContent);
         cb(r);
     } catch (const std::exception& ex) {
-        LOG_ERROR << "ShipTypesController::deleteOne failed id=" << id
+        LOG_ERROR << "ShipTypesController::deleteOne failed code=" << code
                   << ": " << ex.what();
         cb(jsonError("delete failed", mapDbErrorToHttp(ex.what()), ex.what()));
     }

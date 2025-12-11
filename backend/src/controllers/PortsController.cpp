@@ -21,7 +21,7 @@ HttpResponsePtr jsonError(const std::string& msg,
     Json::Value e;
     e["error"] = msg;
     if (!details.empty()) {
-        e["details"] = details; // корисно під час налагодження
+        e["details"] = details; 
     }
     auto r = HttpResponse::newHttpJsonResponse(e);
     r->setStatusCode(code);
@@ -114,6 +114,16 @@ void PortsController::create(const HttpRequestPtr& req,
     p.lat    = body["lat"].asDouble();
     p.lon    = body["lon"].asDouble();
 
+    // Валідація координат
+    if (p.lat < -90.0 || p.lat > 90.0) {
+        cb(jsonError("lat must be between -90 and 90", drogon::k400BadRequest));
+        return;
+    }
+    if (p.lon < -180.0 || p.lon > 180.0) {
+        cb(jsonError("lon must be between -180 and 180", drogon::k400BadRequest));
+        return;
+    }
+
     try {
         PortsRepo repo;
         const auto created = repo.create(p);
@@ -196,6 +206,11 @@ void PortsController::update(const HttpRequestPtr& req,
                 return;
             }
             p.lat = body["lat"].asDouble();
+            // Валідація координат
+            if (p.lat < -90.0 || p.lat > 90.0) {
+                cb(jsonError("lat must be between -90 and 90", drogon::k400BadRequest));
+                return;
+            }
         }
 
         if (body.isMember("lon")) {
@@ -204,6 +219,11 @@ void PortsController::update(const HttpRequestPtr& req,
                 return;
             }
             p.lon = body["lon"].asDouble();
+            // Валідація координат
+            if (p.lon < -180.0 || p.lon > 180.0) {
+                cb(jsonError("lon must be between -180 and 180", drogon::k400BadRequest));
+                return;
+            }
         }
 
         // ВАЖЛИВО:
@@ -235,7 +255,7 @@ void PortsController::remove(const HttpRequestPtr&,
             return;
         }
 
-        // З новим PortsRepo::remove:
+        //  PortsRepo::remove:
         // - false = реально не знайдено (малоймовірно після перевірки)
         // - FK/інші проблеми -> exception
         const bool ok = repo.remove(id);

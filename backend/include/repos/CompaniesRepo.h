@@ -21,7 +21,7 @@ public:
     bool update(std::int64_t id, const std::string& name);
     bool remove(std::int64_t id);
 
-    // ✅ новий API під тести
+    //API під тести
     Company create(const Company& c);
     bool update(const Company& c);
 

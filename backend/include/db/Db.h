@@ -3,6 +3,7 @@
 
 // Forward declaration замість важкого include
 struct sqlite3;
+#include <string>
 
 class Db {
 public:
@@ -11,6 +12,12 @@ public:
     sqlite3* handle() const noexcept { return db_; }
 
     void runMigrations();  // створення/оновлення схеми
+    void insertLog(const std::string &level,
+                   const std::string &event_type,
+                   const std::string &entity,
+                   int entity_id,
+                   const std::string &user,
+                   const std::string &message);
     void reset();          // очистка даних для тестів
 
     Db(const Db&) = delete;

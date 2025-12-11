@@ -2,10 +2,21 @@ from __future__ import annotations
 
 import streamlit as st
 import pandas as pd
+from common import get_health
 import common as api
 
 st.set_page_config(page_title="Company Management", page_icon="🏢", layout="wide")
-st.title("🏢 Company Management")
+api.inject_theme()
+
+# Sidebar identity and health
+st.sidebar.title("🚢 Fleet Manager")
+st.sidebar.caption("Company Management")
+_h = get_health()
+
+# Center title
+col_l, col_c, col_r = st.columns([1, 3, 1])
+with col_c:
+    st.title("🏢 Управління Компаніями")
 
 
 # ================== UI HELPERS ==================
@@ -60,17 +71,43 @@ tab = api.sticky_tabs(
 if tab == "🏢 Компанії":
     st.subheader("Список компаній")
 
+    with st.expander("Фільтри", expanded=True):
+        f1, f2 = st.columns([2, 1])
+        search = f1.text_input("Пошук за назвою", key="company_filter_search")
+        sort_by = f2.selectbox(
+            "Сортування",
+            ["ID ↑", "Назва ↑", "Назва ↓"],
+            key="company_filter_sort",
+        )
+        if st.button("Очистити фільтри", key="company_filter_reset"):
+            st.session_state["company_filter_search"] = ""
+            st.session_state["company_filter_sort"] = "ID ↑"
+            st.rerun()
+
+    filtered = companies_df.copy()
+    if not filtered.empty and "name" in filtered.columns and search:
+        mask = filtered["name"].astype(str).str.contains(search.strip(), case=False, na=False)
+        filtered = filtered[mask]
+
+    if not filtered.empty:
+        if sort_by == "Назва ↑" and "name" in filtered.columns:
+            filtered = filtered.sort_values(by="name", ascending=True)
+        elif sort_by == "Назва ↓" and "name" in filtered.columns:
+            filtered = filtered.sort_values(by="name", ascending=False)
+        else:
+            filtered = filtered.sort_values(by="id", ascending=True, na_position="last")
+
     col_left, col_right = st.columns([1.1, 1])
 
     with col_left:
-        if companies_df.empty:
+        if filtered.empty:
             st.info("Компаній ще немає.")
         else:
-            show_cols = [c for c in ["id", "name"] if c in companies_df.columns]
+            show_cols = [c for c in ["id", "name"] if c in filtered.columns]
             if not show_cols:
-                show_cols = list(companies_df.columns)
+                show_cols = list(filtered.columns)
 
-            df_stretch(api.df_1based(companies_df[show_cols]))
+            df_stretch(api.df_1based(filtered[show_cols]))
 
     with col_right:
         st.markdown("### ➕ Додати компанію")
@@ -163,7 +200,17 @@ elif tab == "⚓ Компанія–Порт":
             current_ports_df["port_id"] = current_ports_df["port_id"].astype(int)
             current_port_ids = set(current_ports_df["port_id"].tolist())
 
-        col_add, col_manage = st.columns([1, 1.2])
+            with st.expander("Фільтр портів", expanded=True):
+                port_filter = st.text_input(
+                    "Пошук порту за назвою/регіоном",
+                    key="company_port_filter",
+                    placeholder="Напр. Odesa або Europe",
+                )
+                if st.button("Очистити", key="company_port_filter_reset"):
+                    st.session_state["company_port_filter"] = ""
+                    st.rerun()
+
+            col_add, col_manage = st.columns([1, 1.2])
 
         # --- Додати порт ---
         with col_add:
@@ -173,6 +220,14 @@ elif tab == "⚓ Компанія–Порт":
             available_ports["id"] = available_ports["id"].astype(int)
 
             available_ports = available_ports[~available_ports["id"].isin(current_port_ids)]
+
+            if port_filter:
+                if "name" in available_ports.columns:
+                    mask_name = available_ports["name"].astype(str).str.contains(port_filter, case=False, na=False)
+                else:
+                    mask_name = False
+                mask_region = available_ports.get("region", pd.Series(dtype=str)).astype(str).str.contains(port_filter, case=False, na=False)
+                available_ports = available_ports[mask_name | mask_region]
 
             if available_ports.empty:
                 st.info("Ця компанія вже присутня у всіх доступних портах.")
@@ -206,6 +261,11 @@ elif tab == "⚓ Компанія–Порт":
                 view_df = current_ports_df.copy()
                 if "port_id" in view_df.columns:
                     view_df["port_name"] = view_df["port_id"].map(port_map)
+
+                if port_filter:
+                    mask_name = view_df.get("port_name", pd.Series(dtype=str)).astype(str).str.contains(port_filter, case=False, na=False)
+                    mask_region = view_df.get("region", pd.Series(dtype=str)).astype(str).str.contains(port_filter, case=False, na=False)
+                    view_df = view_df[mask_name | mask_region]
 
                 st.caption(
                     "ℹ️ Якщо бекенд ще не повертає прапорець головного порту — "
@@ -277,13 +337,38 @@ elif tab == "🚢 Компанія–Кораблі":
 
             company_ships = view[view["company_id"] == selected_company_id].copy()
 
-            if company_ships.empty:
+            with st.expander("Фільтри кораблів", expanded=True):
+                f1, f2, f3 = st.columns([2, 1, 1])
+                ship_search = f1.text_input("Пошук по назві/типу", key="company_ship_filter_search")
+                status_options = sorted([s for s in view.get("status", pd.Series(dtype=str)).dropna().unique()]) if "status" in view.columns else []
+                type_options = sorted([t for t in view.get("type", pd.Series(dtype=str)).dropna().unique()]) if "type" in view.columns else []
+                status_sel = f2.multiselect("Статус", status_options, key="company_ship_filter_status")
+                type_sel = f3.multiselect("Тип", type_options, key="company_ship_filter_type")
+                if st.button("Очистити фільтри", key="company_ship_filter_reset"):
+                    st.session_state["company_ship_filter_search"] = ""
+                    st.session_state["company_ship_filter_status"] = []
+                    st.session_state["company_ship_filter_type"] = []
+                    st.rerun()
+
+            filtered_ships = company_ships.copy()
+            if ship_search:
+                mask_name = filtered_ships.get("name", pd.Series(dtype=str)).astype(str).str.contains(ship_search, case=False, na=False)
+                mask_type = filtered_ships.get("type", pd.Series(dtype=str)).astype(str).str.contains(ship_search, case=False, na=False)
+                filtered_ships = filtered_ships[mask_name | mask_type]
+
+            if status_sel and "status" in filtered_ships.columns:
+                filtered_ships = filtered_ships[filtered_ships["status"].isin(status_sel)]
+
+            if type_sel and "type" in filtered_ships.columns:
+                filtered_ships = filtered_ships[filtered_ships["type"].isin(type_sel)]
+
+            if filtered_ships.empty:
                 st.info("У цієї компанії поки немає кораблів.")
             else:
                 show_cols = [
                     c for c in ["id", "name", "type", "country", "port_id", "status", "company_id"]
-                    if c in company_ships.columns
+                    if c in filtered_ships.columns
                 ]
-                df_stretch(api.df_1based(company_ships[show_cols]))
+                df_stretch(api.df_1based(filtered_ships[show_cols]))
 
     st.caption("💡 Прив’язку корабля до компанії ти вже можеш робити через форму Update на сторінці Ships.")

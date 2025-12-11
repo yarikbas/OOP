@@ -113,6 +113,11 @@ std::optional<CrewAssignment> CrewRepo::assign(long long personId,
 
     const std::int64_t id = sqlite3_last_insert_rowid(db);
 
+    try {
+        std::string msg = "Assigned person_id=" + std::to_string(personId) + " to ship_id=" + std::to_string(shipId) + " (assignment id=" + std::to_string(id) + ")";
+        Db::instance().insertLog("AUDIT", "crew.assign", "crew", (int)id, "system", msg);
+    } catch (...) {}
+
     const char* selSql =
         "SELECT id, person_id, ship_id, start_utc, end_utc "
         "FROM crew_assignments WHERE id=?";
@@ -127,7 +132,7 @@ std::optional<CrewAssignment> CrewRepo::assign(long long personId,
     throw std::runtime_error("insert ok but fetch failed");
 }
 
-// ✅ завершити призначення за id поточним часом SQLite
+// завершити призначення за id поточним часом SQLite
 bool CrewRepo::end(long long assignmentId) {
     sqlite3* db = Db::instance().handle();
 
@@ -144,10 +149,19 @@ bool CrewRepo::end(long long assignmentId) {
         throw std::runtime_error(sqlite3_errmsg(db));
     }
 
-    return sqlite3_changes(db) > 0;
+    const bool changed = sqlite3_changes(db) > 0;
+    if (changed) {
+        try {
+            std::string msg = "Ended assignment id=" + std::to_string(assignmentId);
+            Db::instance().insertLog("AUDIT", "crew.end", "crew", (int)assignmentId, "system", msg);
+        } catch (...) {}
+    }
+
+    return changed;
+
 }
 
-// ✅ завершити призначення за id з явним endUtc
+// завершити призначення за id з явним endUtc
 bool CrewRepo::end(long long assignmentId, const std::string& endUtc) {
     sqlite3* db = Db::instance().handle();
 
@@ -166,7 +180,15 @@ bool CrewRepo::end(long long assignmentId, const std::string& endUtc) {
         throw std::runtime_error(sqlite3_errmsg(db));
     }
 
-    return sqlite3_changes(db) > 0;
+    const bool changed = sqlite3_changes(db) > 0;
+    if (changed) {
+        try {
+            std::string msg = "Ended assignment id=" + std::to_string(assignmentId) + " with endUtc=" + endUtc;
+            Db::instance().insertLog("AUDIT", "crew.end", "crew", (int)assignmentId, "system", msg);
+        } catch (...) {}
+    }
+
+    return changed;
 }
 
 bool CrewRepo::endActiveByPerson(long long personId, const std::string& endUtc) {
@@ -187,5 +209,14 @@ bool CrewRepo::endActiveByPerson(long long personId, const std::string& endUtc) 
         throw std::runtime_error(sqlite3_errmsg(db));
     }
 
-    return sqlite3_changes(db) > 0;
+    const int changedRows = sqlite3_changes(db);
+    const bool changed = changedRows > 0;
+    if (changed) {
+        try {
+            std::string msg = "Ended " + std::to_string(changedRows) + " active assignments for person_id=" + std::to_string(personId) + " with endUtc=" + endUtc;
+            Db::instance().insertLog("AUDIT", "crew.end_multiple", "crew", (int)personId, "system", msg);
+        } catch (...) {}
+    }
+
+    return changed;
 }

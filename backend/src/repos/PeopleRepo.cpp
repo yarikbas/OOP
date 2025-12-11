@@ -51,6 +51,12 @@ Person PeopleRepo::create(const Person& p) {
 
     Person created = p;
     created.id = sqlite3_last_insert_rowid(db);
+    try {
+        std::string msg = "Created person id=" + std::to_string(created.id) + " name='" + created.full_name + "' rank='" + created.rank + "'";
+        Db::instance().insertLog("INFO", "person.create", "person", (int)created.id, "system", msg);
+    } catch (...) {
+        // Logging should not break the main flow
+    }
     return created;
 }
 
@@ -117,6 +123,12 @@ void PeopleRepo::update(const Person& p) {
         throw std::runtime_error("PeopleRepo::update failed: " + std::string(sqlite3_errmsg(db)));
     }
     sqlite3_finalize(st);
+    try {
+        std::string msg = "Updated person id=" + std::to_string(p.id) + " name='" + p.full_name + "' rank='" + p.rank + "'";
+        Db::instance().insertLog("INFO", "person.update", "person", (int)p.id, "system", msg);
+    } catch (...) {
+        // ignore logging errors
+    }
 }
 
 void PeopleRepo::remove(long long id) {
@@ -145,4 +157,10 @@ void PeopleRepo::remove(long long id) {
         throw std::runtime_error("PeopleRepo::remove failed: " + std::string(sqlite3_errmsg(db)));
     }
     sqlite3_finalize(st);
+    try {
+        std::string msg = "Deleted person id=" + std::to_string(id);
+        Db::instance().insertLog("INFO", "person.delete", "person", (int)id, "system", msg);
+    } catch (...) {
+        // ignore logging errors
+    }
 }

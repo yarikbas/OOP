@@ -18,7 +18,7 @@ public:
 
     void list     (const drogon::HttpRequestPtr& req, Callback&& cb);
     void create   (const drogon::HttpRequestPtr& req, Callback&& cb);
-    void getOne   (const drogon::HttpRequestPtr& req, Callback&& cb, std::int64_t id);
-    void updateOne(const drogon::HttpRequestPtr& req, Callback&& cb, std::int64_t id);
-    void deleteOne(const drogon::HttpRequestPtr& req, Callback&& cb, std::int64_t id);
+    void getOne   (const drogon::HttpRequestPtr& req, Callback&& cb, const std::string& code);
+    void updateOne(const drogon::HttpRequestPtr& req, Callback&& cb, const std::string& code);
+    void deleteOne(const drogon::HttpRequestPtr& req, Callback&& cb, const std::string& code);
 };
