@@ -8,68 +8,53 @@ from datetime import datetime, timezone
 st.set_page_config(page_title="Crew & People", page_icon="🧑‍✈️", layout="wide")
 api.inject_theme()
 
-# Sidebar identity and health
 st.sidebar.title("🚢 Fleet Manager")
 st.sidebar.caption("Crew & People")
 from common import get_health
 _h = get_health()
 
 
-# Center title
 col_l, col_c, col_r = st.columns([1, 3, 1])
 with col_c:
-    st.title("🧑‍✈️ Управління Екіпажем та Персоналом")
+    st.title("🧑‍✈️ Crew and Personnel Management")
 
 
-# ================== UI HELPERS ==================
+### UI HELPERS
 def df_stretch(df: pd.DataFrame, **kwargs):
-    """
-    Сумісне відображення таблиць для нових/старих версій Streamlit.
-    Новий API: width="stretch"
-    Старий API: use_container_width=True
-    """
     try:
         st.dataframe(df, width="stretch", **kwargs)
     except TypeError:
         st.dataframe(df, width="stretch", **kwargs)
 
 
-# ============================================================
-# Бекенд перевіряє rank українськими рядками.
-# UI зберігає в БД саме LABEL.
-#
-# Домовленість:
-# "Солдат" == "Військовий" (синоніми).
-# У UI використовуємо "Військовий" як основний термін.
-# ============================================================
 PROFESSIONS = [
-    ("Captain",    "Капітан"),
-    ("Engineer",   "Інженер"),
-    ("Military",   "Військовий"),
-    ("Researcher", "Дослідник"),
+    ("Captain",    "Captain"),
+    ("Engineer",   "Engineer"),
+    ("Military",   "Military"),
+    ("Researcher", "Researcher"),
 ]
 
 LABEL_BY_CODE = {code: label for code, label in PROFESSIONS}
 CODE_BY_LABEL = {label: code for code, label in PROFESSIONS}
 PROF_LABELS = [label for _, label in PROFESSIONS]
 
-# legacy/синоніми з БД -> канонічний лейбл для UI
 LEGACY_TO_LABEL = {
-    "Солдат": "Військовий",
-    "Soldier": "Військовий",
+    "Солдат": "Military",
+    "Soldier": "Military",
+    "Капітан": "Captain",
+    "Інженер": "Engineer",
+    "Дослідник": "Researcher",
+    "Військовий": "Military",
 }
 
 def rank_to_db(label: str) -> str:
-    # В БД кладемо саме український LABEL
     return label
 
 def rank_to_ui_label(raw_rank: str) -> str:
     if not raw_rank:
         return ""
-    # якщо раптом прийшов код
     if raw_rank in LABEL_BY_CODE:
         return LABEL_BY_CODE[raw_rank]
-    # якщо прийшов legacy-термін
     if raw_rank in LEGACY_TO_LABEL:
         return LEGACY_TO_LABEL[raw_rank]
     return raw_rank
@@ -85,56 +70,51 @@ def default_prof_index_from_db_rank(raw_rank: str) -> int:
         return 0
 
 
-# Flash
 if "last_success" in st.session_state:
     st.success(st.session_state.pop("last_success"))
 
 
-# ================== LOAD ==================
+### LOAD
 try:
     ships_df  = api.get_ships()
     people_df = api.get_people()
     ship_name_map   = api.get_ship_name_map()
     person_name_map = api.get_person_name_map()
 except Exception as e:
-    st.error(f"Не вдалося завантажити довідники: {e}")
+    st.error(f"Failed to load references: {e}")
     st.stop()
 
 
-# ================== STICKY MAIN TABS ==================
+### STICKY MAIN TABS
 tab = api.sticky_tabs(
-    ["⚓ Управління Екіпажами", "👤 Управління Персоналом (CRUD)"],
+    ["⚓ Crew Management", "👤 Personnel Management (CRUD)"],
     "crew_people_main_tabs",
 )
 
 
-# ============================================================
-#               УПРАВЛІННЯ ЕКІПАЖАМИ
-# ============================================================
-if tab == "⚓ Управління Екіпажами":
-    st.subheader("Призначення та зняття з екіпажу")
+if tab == "⚓ Crew Management":
+    st.subheader("Assign and Remove from Crew")
 
     if ships_df.empty:
-        st.warning("Немає кораблів. Спочатку створіть корабель.")
+        st.warning("No ships. First create a ship.")
     elif people_df.empty:
-        st.warning("Немає людей. Спочатку створіть людину.")
+        st.warning("No people. First create a person.")
     elif not ship_name_map:
-        st.warning("Не вдалося побудувати список кораблів для вибору.")
+        st.warning("Failed to build ship list for selection.")
     else:
         selected_ship_id = st.selectbox(
-            "Оберіть корабель для управління екіпажем",
+            "Select ship for crew management",
             list(ship_name_map.keys()),
-            format_func=lambda x: ship_name_map.get(x, "Н/Д"),
+            format_func=lambda x: ship_name_map.get(x, "N/A"),
             key="crew_ship_select",
         )
-        selected_ship_name = ship_name_map.get(selected_ship_id, "Н/Д")
-        st.markdown(f"**Обрано:** {selected_ship_name}")
+        selected_ship_name = ship_name_map.get(selected_ship_id, "N/A")
+        st.markdown(f"**Selected:** {selected_ship_name}")
 
         col_assign, col_unassign, col_current = st.columns([1, 1, 1.5])
 
-        # ---------- Призначити ----------
         with col_assign:
-            st.markdown("#### ➕ Призначити")
+            st.markdown("#### ➕ Assign")
 
             active_person_ids = api.get_all_active_person_ids()
 
@@ -144,17 +124,17 @@ if tab == "⚓ Управління Екіпажами":
                 available_people = pd.DataFrame()
 
             if available_people.empty:
-                st.info("Немає вільних людей для призначення.")
+                st.info("No available people to assign.")
             else:
                 with st.form("assign_form"):
                     person_options = available_people["id"].tolist()
                     selected_person_id = st.selectbox(
-                        "Оберіть вільну людину",
+                        "Select available person",
                         person_options,
-                        format_func=lambda x: person_name_map.get(x, "Н/Д"),
+                        format_func=lambda x: person_name_map.get(x, "N/A"),
                         key="assign_person_select",
                     )
-                    submitted = st.form_submit_button("Призначити в команду")
+                    submitted = st.form_submit_button("Assign to Crew")
 
                     if submitted:
                         now_utc = datetime.now(timezone.utc).isoformat()
@@ -167,28 +147,27 @@ if tab == "⚓ Управління Екіпажами":
                             "/api/crew/assign",
                             payload,
                             success_msg=(
-                                f"Людина (id={selected_person_id}) призначена на корабель."
+                                f"Person (id={selected_person_id}) assigned to ship."
                             ),
                         )
 
-        # ---------- Зняти ----------
         with col_unassign:
-            st.markdown("#### ➖ Зняти")
+            st.markdown("#### ➖ Remove")
 
             crew_df = api.get_ship_crew(selected_ship_id)
 
             if crew_df.empty or "person_id" not in crew_df.columns:
-                st.info("На кораблі немає активного екіпажу.")
+                st.info("No active crew on this ship.")
             else:
                 with st.form("unassign_form"):
                     active_person_options = crew_df["person_id"].tolist()
                     selected_active_person_id = st.selectbox(
-                        "Оберіть активного члена екіпажу",
+                        "Select active crew member",
                         active_person_options,
-                        format_func=lambda x: person_name_map.get(x, "Н/Д"),
+                        format_func=lambda x: person_name_map.get(x, "N/A"),
                         key="unassign_person_select",
                     )
-                    submitted = st.form_submit_button("Зняти з корабля", type="primary")
+                    submitted = st.form_submit_button("Remove from Ship", type="primary")
 
                     if submitted:
                         now_utc = datetime.now(timezone.utc).isoformat()
@@ -200,17 +179,16 @@ if tab == "⚓ Управління Екіпажами":
                             "/api/crew/end",
                             payload,
                             success_msg=(
-                                f"Людина (id={selected_active_person_id}) знята з корабля."
+                                f"Person (id={selected_active_person_id}) removed from ship."
                             ),
                         )
 
-        # ---------- Поточний екіпаж ----------
         with col_current:
-            st.markdown("#### 👥 Поточний екіпаж")
+            st.markdown("#### 👥 Current Crew")
 
             crew_df_current = api.get_ship_crew(selected_ship_id)
             if crew_df_current.empty:
-                st.caption("Поточний екіпаж порожній.")
+                st.caption("Current crew is empty.")
             else:
                 if not people_df.empty and {"id", "full_name", "rank"}.issubset(people_df.columns):
                     people_small = people_df[["id", "full_name", "rank"]].rename(
@@ -225,58 +203,50 @@ if tab == "⚓ Управління Екіпажами":
                         lambda r: rank_to_ui_label(str(r))
                     )
 
+                display_cols = ["full_name", "rank"]
+                crew_display = crew_df_current[[col for col in display_cols if col in crew_df_current.columns]]
+                
                 df_stretch(
-                    api.df_1based(crew_df_current),
+                    api.df_1based(crew_display),
                     height=400,
                 )
 
 
-# ============================================================
-#           УПРАВЛІННЯ ПЕРСОНАЛОМ (CRUD)
-# ============================================================
-elif tab == "👤 Управління Персоналом (CRUD)":
-    st.subheader("Управління списком персоналу")
+elif tab == "👤 Personnel Management (CRUD)":
+    st.subheader("Personnel List Management")
 
     people_tab = api.sticky_tabs(
-        ["📋 Список", "➕ Створити", "🛠️ Оновити", "❌ Видалити"],
+        ["📋 List", "➕ Create", "🛠️ Update", "❌ Delete"],
         "people_crud_tabs",
     )
 
-    # ---------- Список ----------
-    if people_tab == "📋 Список":
+    if people_tab == "📋 List":
+        st.markdown("### 📋 All People")
+        
         active_ship_map = api.get_active_ship_map()
         ship_name_map2  = api.get_ship_name_map()
 
         people_view = people_df.copy()
 
-        # -------- Фільтри --------
-        with st.expander("Фільтри та пошук", expanded=True):
-            c1, c2, c3, c4 = st.columns([1.6, 1, 1, 1])
-            q = c1.text_input("Пошук за ім'ям", placeholder="John / Jane", key="people_search")
+        if not people_view.empty:
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total People", len(people_view))
+            with col2:
+                assigned_count = sum(1 for pid in people_view["id"] if active_ship_map.get(int(pid)))
+                st.metric("Assigned to Ships", assigned_count)
+            with col3:
+                if "rank" in people_view.columns:
+                    top_rank = people_view["rank"].value_counts().idxmax() if len(people_view) > 0 else "—"
+                    st.metric("Most Common Role", top_rank)
+        
+        q = st.text_input("🔍 Search by name", placeholder="Type person name...", key="people_search")
 
-            if "people_rank_flt" not in st.session_state:
-                st.session_state["people_rank_flt"] = []
-            rank_flt = c2.multiselect("Професія", PROF_LABELS, key="people_rank_flt")
-
-            active_only = c3.checkbox("Лише активні", value=False, key="people_active_only")
-            assigned_only = c4.checkbox("Лише з кораблем", value=False, key="people_assigned_only")
-
-            if st.button("Очистити фільтри", key="people_clear_filters"):
-                for k in ["people_search", "people_rank_flt", "people_active_only", "people_assigned_only"]:
-                    st.session_state.pop(k, None)
-                st.experimental_rerun()
-
-        # Normalise rank for filtering/display
         if "rank" in people_view.columns:
             people_view["rank_ui"] = people_view["rank"].map(lambda r: rank_to_ui_label(str(r)))
 
-        # Apply filters
         if q and "full_name" in people_view.columns:
             people_view = people_view[people_view["full_name"].astype(str).str.contains(q, case=False, na=False)]
-        if rank_flt and "rank_ui" in people_view.columns:
-            people_view = people_view[people_view["rank_ui"].isin(rank_flt)]
-        if active_only and "active" in people_view.columns:
-            people_view = people_view[people_view["active"] == True]
 
         if not people_view.empty and "id" in people_view.columns:
             def current_ship_label(person_id):
@@ -291,9 +261,6 @@ elif tab == "👤 Управління Персоналом (CRUD)":
 
             people_view["current_ship"] = people_view["id"].map(current_ship_label)
 
-            if assigned_only:
-                people_view = people_view[people_view["current_ship"].fillna("") != ""]
-
             if "rank_ui" in people_view.columns:
                 people_view["rank"] = people_view["rank_ui"]
 
@@ -307,29 +274,25 @@ elif tab == "👤 Управління Персоналом (CRUD)":
 
             people_view = people_view[cols_order]
 
-        # KPI chips
-        cA, cB, cC = st.columns(3)
-        cA.metric("Людей у вибірці", len(people_view))
-        if "active" in people_view.columns:
-            cB.metric("Активні", int((people_view["active"] == True).sum()))
-        cC.metric("З кораблем", int(people_view["current_ship"].notna().sum()) if "current_ship" in people_view.columns else 0)
+        if people_view.empty:
+            st.info("No people found.")
+        else:
+            st.caption(f"Showing {len(people_view)} person(s)")
+            df_stretch(api.df_1based(people_view))
 
-        df_stretch(api.df_1based(people_view))
-
-    # ---------- Створити ----------
-    elif people_tab == "➕ Створити":
+    elif people_tab == "➕ Create":
         with st.form("create_person_form"):
-            full_name = st.text_input("Повне ім'я", key="create_person_full_name")
+            full_name = st.text_input("Full Name", key="create_person_full_name")
 
             selected_label = st.selectbox(
-                "Професія",
+                "Profession",
                 options=PROF_LABELS,
                 key="create_profession_select",
             )
 
-            active = st.checkbox("Активний", value=True, key="create_person_active")
+            active = st.checkbox("Active", value=True, key="create_person_active")
 
-            if st.form_submit_button("Створити людину"):
+            if st.form_submit_button("Create Person"):
                 if full_name:
                     api.api_post(
                         "/api/people",
@@ -338,27 +301,26 @@ elif tab == "👤 Управління Персоналом (CRUD)":
                             "rank": rank_to_db(selected_label),
                             "active": bool(active),
                         },
-                        success_msg=f"Людина '{full_name}' створена.",
+                        success_msg=f"Person '{full_name}' created.",
                     )
                 else:
-                    st.error("Повне ім'я є обов'язковим.")
+                    st.error("Full name is required.")
 
-    # ---------- Оновити ----------
-    elif people_tab == "🛠️ Оновити":
+    elif people_tab == "🛠️ Update":
         if people_df.empty:
-            st.info("Немає людей для оновлення.")
+            st.info("No people to update.")
         else:
             person_id_to_update = st.selectbox(
-                "Оберіть людину для оновлення",
+                "Select person to update",
                 people_df["id"].tolist(),
-                format_func=lambda x: person_name_map.get(x, "Н/Д"),
+                format_func=lambda x: person_name_map.get(x, "N/A"),
                 key="person_update_select",
             )
             selected_person = people_df[people_df["id"] == person_id_to_update].iloc[0]
 
             with st.form("update_person_form"):
                 new_full_name = st.text_input(
-                    "Повне ім'я",
+                    "Full Name",
                     value=str(selected_person.get("full_name", "")),
                     key="update_person_full_name",
                 )
@@ -367,19 +329,19 @@ elif tab == "👤 Управління Персоналом (CRUD)":
                 default_index = default_prof_index_from_db_rank(current_rank_raw)
 
                 selected_label = st.selectbox(
-                    "Професія",
+                    "Profession",
                     options=PROF_LABELS,
                     index=default_index,
                     key="update_profession_select",
                 )
 
                 new_active = st.checkbox(
-                    "Активний",
+                    "Active",
                     value=bool(selected_person.get("active", True)),
                     key="update_person_active",
                 )
 
-                if st.form_submit_button("Оновити дані"):
+                if st.form_submit_button("Update Data"):
                     if new_full_name:
                         api.api_put(
                             f"/api/people/{person_id_to_update}",
@@ -388,27 +350,26 @@ elif tab == "👤 Управління Персоналом (CRUD)":
                                 "rank": rank_to_db(selected_label),
                                 "active": bool(new_active),
                             },
-                            success_msg=f"Дані '{new_full_name}' оновлено.",
+                            success_msg=f"Data for '{new_full_name}' updated.",
                         )
                     else:
-                        st.error("Повне ім'я є обов'язковим.")
+                        st.error("Full name is required.")
 
-    # ---------- Видалити ----------
-    elif people_tab == "❌ Видалити":
+    elif people_tab == "❌ Delete":
         if people_df.empty:
-            st.info("Немає людей для видалення.")
+            st.info("No people to delete.")
         else:
             person_id_to_delete = st.selectbox(
-                "Оберіть людину для видалення",
+                "Select person to delete",
                 people_df["id"].tolist(),
-                format_func=lambda x: person_name_map.get(x, "Н/Д"),
+                format_func=lambda x: person_name_map.get(x, "N/A"),
                 key="person_delete_select",
             )
-            person_name = person_name_map.get(person_id_to_delete, "Н/Д")
+            person_name = person_name_map.get(person_id_to_delete, "N/A")
 
-            st.warning("Видалення активного члена екіпажу може спричинити помилку.", icon="⚠️")
-            if st.button(f"❌ Видалити '{person_name}'", type="primary", key="person_delete_btn"):
+            st.warning("Deleting an active crew member may cause an error.", icon="⚠️")
+            if st.button(f"❌ Delete '{person_name}'", type="primary", key="person_delete_btn"):
                 api.api_del(
                     f"/api/people/{person_id_to_delete}",
-                    success_msg=f"Людина '{person_name}' видалена.",
+                    success_msg=f"Person '{person_name}' deleted.",
                 )

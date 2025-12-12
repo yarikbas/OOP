@@ -5,21 +5,18 @@ from datetime import datetime, timedelta
 import streamlit as st
 import pandas as pd
 
-from common import api_get, df_1based, t, language_selector
+from common import api_get, df_1based, t
 
 
 st.set_page_config(page_title="Logs & Analytics", page_icon="📊", layout="wide")
 from common import inject_theme
 inject_theme()
 
-# Sidebar / app identity
 st.sidebar.title(f"🚢 {t('app_title')}")
 st.sidebar.caption(t("logs_analytics"))
 
-# Language selector
-language_selector()
 
-# Centered page title
+
 col_l, col_c, col_r = st.columns([1, 3, 1])
 with col_c:
     st.title(t("logs_title"))
@@ -46,7 +43,6 @@ with st.expander(t("filters"), expanded=True):
         key="logs_object"
     )
     
-    # Map user-friendly names to backend values
     action_map = {
         t("create"): ".create",
         t("update"): ".update",
@@ -61,7 +57,7 @@ with st.expander(t("filters"), expanded=True):
     
     event_type = action_map.get(action_type, "")
     entity = object_map.get(object_type, "")
-    entity_id = ""  # Hidden from user
+    entity_id = ""
     
     r2c1, r2c2 = st.columns([2, 2])
     message_sub = r2c1.text_input(
@@ -79,7 +75,6 @@ with st.expander(t("filters"), expanded=True):
         key="logs_level_display"
     )
     
-    # Map display level to backend
     level_map = {
         t("information"): "INFO",
         t("warning"): "WARN",
@@ -96,7 +91,7 @@ with st.expander(t("filters"), expanded=True):
         key="logs_period",
     )
     page_size = int(r3c2.number_input(t("records_count"), min_value=10, max_value=500, value=100, step=10))
-    page = 0  # Always show first page for simplicity
+    page = 0
 
     if period == t("custom_range"):
         d1, d2 = st.columns(2)
@@ -115,7 +110,6 @@ with st.expander(t("filters"), expanded=True):
     c_btn1, c_btn2, _ = st.columns([1, 1, 4])
     refresh = c_btn1.button(t("refresh"), type="primary", use_container_width=True)
     if c_btn2.button(t("reset_filters"), use_container_width=True):
-        # Clear all filter keys from session state
         keys_to_clear = ["logs_action", "logs_object", "logs_msg", "logs_level_display", "logs_period", "logs_since", "logs_until"]
         for key in keys_to_clear:
             if key in st.session_state:
@@ -176,8 +170,6 @@ if df.empty:
     st.info(t("no_records"))
 else:
     df_display = df.copy()
-    
-    # Create user-friendly display
     if "ts" in df_display.columns:
         df_display[t("time")] = pd.to_datetime(df_display["ts"]).dt.strftime("%d.%m.%Y %H:%M")
     
@@ -196,7 +188,6 @@ else:
     if "user" in df_display.columns:
         df_display[t("user")] = df_display["user"].fillna(t("system"))
     
-    # Select only user-friendly columns
     display_columns = [t("time"), t("importance"), t("description"), t("user")]
     df_display = df_display[[col for col in display_columns if col in df_display.columns]]
     
@@ -216,7 +207,6 @@ else:
     st.download_button(t("download_csv"), data=csv, file_name="logs.csv", mime="text/csv", use_container_width=True)
 
 
-    # Simple analytics
     st.markdown("---")
     st.subheader(t("analytics"))
     
@@ -225,7 +215,6 @@ else:
     with c1:
         st.caption(f"**{t('distribution_by_actions')}**")
         if "event_type" in df.columns:
-            # Translate event types
             event_translation = {
                 "ship.create": t("ship_create"),
                 "ship.update": t("ship_update"),
@@ -275,7 +264,6 @@ else:
         else:
             st.info(t("no_level_data"))
     
-    # Time series: logs per day
     st.caption(f"**{t('activity_by_days')}**")
     if "ts" in df.columns:
         try:

@@ -8,25 +8,22 @@ import common as api
 st.set_page_config(page_title="Admin / Data", page_icon="⚙️", layout="wide")
 api.inject_theme()
 
-# Sidebar identity and health
 st.sidebar.title("🚢 Fleet Manager")
 st.sidebar.caption("Admin / Data")
 from common import get_health
 _h = get_health()
 
 
-# Center title
 col_l, col_c, col_r = st.columns([1, 3, 1])
 with col_c:
-    st.title("⚙️ Адмін-Панель та Дані")
-st.caption("Тут керуємо Портами та МОДЕЛЯМИ кораблів.")
+    st.title("⚙️ Admin Panel and Data")
+st.caption("Here we manage Ports and Ship MODELS.")
 
-# Flash
 if "last_success" in st.session_state:
     st.success(st.session_state.pop("last_success"))
 
 
-# ================== UI HELPERS ==================
+### UI HELPERS
 def df_stretch(df: pd.DataFrame, **kwargs):
     try:
         st.dataframe(df, width="stretch", **kwargs)
@@ -34,20 +31,18 @@ def df_stretch(df: pd.DataFrame, **kwargs):
         st.dataframe(df, use_container_width=True, **kwargs)
 
 
-# ================== BASE SHIP TYPES ==================
-# Це жорстко зашиті категорії, які розуміє C++ бекенд
+### BASE SHIP TYPES
 BASE_TYPES = [
-    ("cargo",     "Вантажний"),
-    ("military",  "Військовий"),
-    ("research",  "Дослідницький"),
-    ("passenger", "Пасажирський"),
+    ("cargo",     "Cargo"),
+    ("military",  "Military"),
+    ("research",  "Research"),
+    ("passenger", "Passenger"),
 ]
 BASE_LABEL = {c: n for c, n in BASE_TYPES}
 BASE_CODES = [c for c, _ in BASE_TYPES]
 
 
 def split_model_code(full_code: str) -> tuple[str, str]:
-    """Розбиває code='cargo_panamax' на ('cargo', 'panamax')"""
     if not full_code: return "", ""
     if "_" not in full_code: return "", full_code
     base, rest = full_code.split("_", 1)
@@ -55,170 +50,196 @@ def split_model_code(full_code: str) -> tuple[str, str]:
 
 
 def generate_slug(text: str) -> str:
-    """
-    Генерує чистий хвостик коду з назви:
-    "Super Tanker 3000" -> "super-tanker-3000"
-    """
     s = str(text).lower().strip()
-    # Замінюємо пробіли на дефіси
     s = re.sub(r'\s+', '-', s)
-    # Залишаємо тільки латиницю, цифри і дефіс
-    # (Кирилицю можна було б транслітерувати, але для простоти просто чистимо)
     s = re.sub(r'[^a-z0-9\-]', '', s)
     return s
 
 
-# ================== LOAD ==================
+### LOAD
 try:
     ports_df = api.get_ports()
     types_df = api.get_ship_types()
     port_map = api.get_name_map(ports_df)
 except Exception as e:
-    st.error(f"Не вдалося завантажити довідники: {e}")
+    st.error(f"Failed to load references: {e}")
     st.stop()
 
 
-# ================== MAIN TABS ==================
+### MAIN TABS
 tab = api.sticky_tabs(
-    ["⚓ Управління Портами", "📋 Моделі Кораблів", "📥 Імпорт реальних даних"],
+    ["⚓ Port Management", "📋 Ship Models", "📥 Import Real Data", "📤 Export Data"],
     "admin_main_tabs",
 )
 
-# -------------------------------------------------------------------
-#                               PORTS
-# -------------------------------------------------------------------
-if tab == "⚓ Управління Портами":
-    st.subheader("Управління Портами")
+if tab == "⚓ Port Management":
+    st.subheader("Port Management")
 
     crud = api.sticky_tabs(
-        ["📋 Список", "➕ Створити", "🛠️ Оновити", "❌ Видалити"],
+        ["📋 List", "➕ Create", "🛠️ Update", "❌ Delete"],
         "admin_ports_crud_tabs",
     )
 
-    # Список
-    if crud == "📋 Список":
-        with st.expander("Фільтри портів", expanded=True):
-            f1, f2, f3 = st.columns([2, 1, 1])
-            port_search = f1.text_input("Пошук за назвою/регіоном", key="port_filter_search")
-            regions = sorted([r for r in ports_df.get("region", pd.Series(dtype=str)).dropna().unique()]) if not ports_df.empty else []
-            region_sel = f2.selectbox("Регіон", options=["(усі)"] + regions, index=0, key="port_filter_region")
-            sort_sel = f3.selectbox("Сортування", ["ID ↑", "Назва ↑", "Назва ↓"], key="port_filter_sort")
-            if st.button("Очистити", key="port_filter_reset"):
-                st.session_state["port_filter_search"] = ""
-                st.session_state["port_filter_region"] = "(усі)"
-                st.session_state["port_filter_sort"] = "ID ↑"
-                st.rerun()
-
+    if crud == "📋 List":
+        st.markdown("### 📋 All Ports")
+        
+        if not ports_df.empty:
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Ports", len(ports_df))
+            with col2:
+                regions_count = ports_df["region"].nunique() if "region" in ports_df.columns else 0
+                st.metric("Regions", regions_count)
+            with col3:
+                if "region" in ports_df.columns:
+                    top_region = ports_df["region"].value_counts().idxmax() if len(ports_df) > 0 else "—"
+                    st.metric("Most ports in", top_region)
+        
+        port_search = st.text_input("🔍 Search by name", placeholder="Type port name...", key="port_filter_search")
+        
         filtered_ports = ports_df.copy()
-        if port_search:
+        if port_search and not filtered_ports.empty:
             mask_name = filtered_ports.get("name", pd.Series(dtype=str)).astype(str).str.contains(port_search, case=False, na=False)
-            mask_region = filtered_ports.get("region", pd.Series(dtype=str)).astype(str).str.contains(port_search, case=False, na=False)
-            filtered_ports = filtered_ports[mask_name | mask_region]
-
-        if region_sel != "(усі)" and "region" in filtered_ports.columns:
-            filtered_ports = filtered_ports[filtered_ports["region"] == region_sel]
-
-        if not filtered_ports.empty:
-            if sort_sel == "Назва ↑" and "name" in filtered_ports.columns:
-                filtered_ports = filtered_ports.sort_values(by="name", ascending=True)
-            elif sort_sel == "Назва ↓" and "name" in filtered_ports.columns:
-                filtered_ports = filtered_ports.sort_values(by="name", ascending=False)
-            else:
-                filtered_ports = filtered_ports.sort_values(by="id", ascending=True, na_position="last")
+            filtered_ports = filtered_ports[mask_name]
 
         if filtered_ports.empty:
-            st.info("Портів ще немає.")
+            st.info("No ports found.")
         else:
+            st.caption(f"Showing {len(filtered_ports)} port(s)")
             df_stretch(api.df_1based(filtered_ports))
 
-    # Створити
-    elif crud == "➕ Створити":
+    elif crud == "➕ Create":
+        st.markdown("### ➕ Create New Port")
+        
+        WORLD_REGIONS = [
+            "Europe",
+            "Asia",
+            "Africa",
+            "North America",
+            "South America",
+            "Australia",
+            "Antarctica",
+            "Arctic",
+        ]
+        
         with st.form("create_port_form"):
-            name = st.text_input("Назва порту", placeholder="Odesa", key="create_port_name")
-            region = st.text_input("Регіон", placeholder="Europe", key="create_port_region")
-            lat = st.number_input("Широта", value=46.48, format="%.6f", key="create_port_lat")
-            lon = st.number_input("Довгота", value=30.72, format="%.6f", key="create_port_lon")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                name = st.text_input("Port Name *", placeholder="e.g., Rotterdam", key="create_port_name")
+                region = st.selectbox("Region *", options=WORLD_REGIONS, key="create_port_region")
+            
+            with col2:
+                lat = st.number_input("Latitude *", value=0.0, min_value=-90.0, max_value=90.0, format="%.6f", key="create_port_lat", help="Range: -90 to 90")
+                lon = st.number_input("Longitude *", value=0.0, min_value=-180.0, max_value=180.0, format="%.6f", key="create_port_lon", help="Range: -180 to 180")
+            
+            st.caption("* Required fields")
 
-            if st.form_submit_button("Створити порт"):
+            if st.form_submit_button("✅ Create Port", type="primary"):
                 if name and region:
                     api.api_post(
                         "/api/ports",
                         {"name": name, "region": region, "lat": lat, "lon": lon},
-                        success_msg=f"Порт '{name}' створено."
+                        success_msg=f"Port '{name}' created in {region}."
                     )
                 else:
-                    st.error("Назва та Регіон є обов'язковими.")
+                    st.error("Port name and region are required.")
 
-    # Оновити
-    elif crud == "🛠️ Оновити":
+    elif crud == "🛠️ Update":
+        st.markdown("### 🛠️ Update Port")
+        
         if ports_df.empty:
-            st.info("Немає портів для оновлення.")
+            st.info("No ports to update.")
         else:
+            WORLD_REGIONS = [
+                "Europe",
+                "Asia",
+                "Africa",
+                "North America",
+                "South America",
+                "Australia",
+                "Antarctica",
+                "Arctic",
+            ]
+            
             port_ids = ports_df["id"].tolist()
-            pid = st.selectbox("Оберіть порт", port_ids, format_func=lambda x: port_map.get(x, "N/A"))
+            pid = st.selectbox("Select Port to Update", port_ids, format_func=lambda x: port_map.get(x, f"#{x}"))
             row = ports_df[ports_df["id"] == pid].iloc[0]
 
             with st.form("update_port_form"):
-                new_name = st.text_input("Назва", value=str(row.get('name', "")))
-                new_region = st.text_input("Регіон", value=str(row.get('region', "")))
-                new_lat = st.number_input("Широта", value=float(row.get('lat', 0.0)), format="%.6f")
-                new_lon = st.number_input("Довгота", value=float(row.get('lon', 0.0)), format="%.6f")
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    new_name = st.text_input("Port Name *", value=str(row.get('name', "")))
+                    current_region = str(row.get('region', 'Europe'))
+                    region_index = WORLD_REGIONS.index(current_region) if current_region in WORLD_REGIONS else 0
+                    new_region = st.selectbox("Region *", options=WORLD_REGIONS, index=region_index)
+                
+                with col2:
+                    new_lat = st.number_input("Latitude *", value=float(row.get('lat', 0.0)), min_value=-90.0, max_value=90.0, format="%.6f")
+                    new_lon = st.number_input("Longitude *", value=float(row.get('lon', 0.0)), min_value=-180.0, max_value=180.0, format="%.6f")
 
-                if st.form_submit_button("Оновити порт"):
+                if st.form_submit_button("✅ Update Port", type="primary"):
                     api.api_put(
                         f"/api/ports/{pid}",
                         {"name": new_name, "region": new_region, "lat": new_lat, "lon": new_lon},
-                        success_msg=f"Порт '{new_name}' оновлено."
+                        success_msg=f"Port '{new_name}' updated."
                     )
 
-    # Видалити
-    elif crud == "❌ Видалити":
+    elif crud == "❌ Delete":
+        st.markdown("### ❌ Delete Port")
+        
         if ports_df.empty:
-            st.info("Немає портів для видалення.")
+            st.info("No ports to delete.")
         else:
-            pid = st.selectbox("Порт для видалення", ports_df["id"].tolist(), format_func=lambda x: port_map.get(x, "N/A"))
+            pid = st.selectbox("Select Port to Delete", ports_df["id"].tolist(), format_func=lambda x: port_map.get(x, f"#{x}"))
             pname = port_map.get(pid, "N/A")
 
-            st.warning("Видалення порту призведе до помилки, якщо там є кораблі!", icon="⚠️")
-            if st.button(f"❌ Видалити '{pname}'", type="primary"):
-                api.api_del(f"/api/ports/{pid}", success_msg=f"Порт '{pname}' видалено.")
+            st.warning("⚠️ Warning: Deleting a port may cause errors if there are ships or companies linked to it!", icon="⚠️")
+            
+            if st.button(f"❌ Delete '{pname}'", type="primary"):
+                api.api_del(f"/api/ports/{pid}", success_msg=f"Port '{pname}' deleted.")
 
 
-# -------------------------------------------------------------------
-#                           SHIP MODELS
-# -------------------------------------------------------------------
-elif tab == "📋 Моделі Кораблів":
-    st.subheader("Моделі кораблів")
-    st.caption("Створюйте моделі (наприклад 'Panamax', 'Cruiser') на основі 4-х базових категорій.")
+elif tab == "📋 Ship Models":
+    st.subheader("Ship Models")
+    st.caption("Create models (e.g., 'Panamax', 'Cruiser') based on 4 base categories.")
 
     crud = api.sticky_tabs(
-        ["📋 Список моделей", "➕ Створити модель", "🛠️ Оновити модель", "❌ Видалити модель"],
+        ["📋 Model List", "➕ Create Model", "🛠️ Update Model", "❌ Delete Model"],
         "admin_models_crud_tabs",
     )
 
-    # --------- LIST ---------
-    if crud == "📋 Список моделей":
-        with st.expander("Фільтри моделей", expanded=True):
-            f1, f2 = st.columns([2, 1])
-            model_search = f1.text_input("Пошук за назвою/кодом", key="model_filter_search")
-            base_opts = ["(усі)"] + BASE_CODES
-            base_sel = f2.selectbox("Базова категорія", base_opts, index=0, key="model_filter_base")
-            if st.button("Очистити", key="model_filter_reset"):
-                st.session_state["model_filter_search"] = ""
-                st.session_state["model_filter_base"] = "(усі)"
-                st.rerun()
+    if crud == "📋 Model List":
+        st.markdown("### 📋 All Ship Models")
+        
+        if not types_df.empty:
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Models", len(types_df))
+            with col2:
+                base_types_count = len(BASE_CODES)
+                st.metric("Base Categories", base_types_count)
+            with col3:
+                if "code" in types_df.columns:
+                    base_counts = {}
+                    for code in types_df["code"].astype(str):
+                        base = code.split("_")[0] if "_" in code else code
+                        base_counts[base] = base_counts.get(base, 0) + 1
+                    if base_counts:
+                        top_base = max(base_counts, key=base_counts.get)
+                        st.metric("Most Models", BASE_LABEL.get(top_base, top_base))
+        
+        model_search = st.text_input("🔍 Search by name or code", placeholder="Type model name...", key="model_filter_search")
 
         filtered_types = types_df.copy()
-        if model_search:
+        if model_search and not filtered_types.empty:
             mask_name = filtered_types.get("name", pd.Series(dtype=str)).astype(str).str.contains(model_search, case=False, na=False)
             mask_code = filtered_types.get("code", pd.Series(dtype=str)).astype(str).str.contains(model_search, case=False, na=False)
             filtered_types = filtered_types[mask_name | mask_code]
 
-        if base_sel != "(усі)" and "code" in filtered_types.columns:
-            filtered_types = filtered_types[filtered_types["code"].astype(str).str.startswith(f"{base_sel}_")]
-
         if filtered_types.empty:
-            st.info("Моделей ще немає.")
+            st.info("No models found.")
         else:
             view = filtered_types.copy()
             if "code" in view.columns:
@@ -233,42 +254,40 @@ elif tab == "📋 Моделі Кораблів":
 
             cols = ["id", "base_type", "name", "technical_suffix", "description"]
             final_cols = [c for c in cols if c in view.columns]
+            
+            st.caption(f"Showing {len(filtered_types)} model(s)")
             df_stretch(api.df_1based(view[final_cols]))
 
-    # --------- CREATE MODEL ---------
-    elif crud == "➕ Створити модель":
+    elif crud == "➕ Create Model":
         with st.form("create_model_form"):
-            # 1. Вибір категорії (це впливає на бізнес-логіку)
             base_code = st.selectbox(
-                "Категорія корабля (впливає на вимоги до екіпажу)",
+                "Ship Category (affects crew requirements)",
                 options=BASE_CODES,
                 format_func=lambda c: BASE_LABEL.get(c, c),
-                help="Вантажний потребує інженера, Військовий - солдата тощо.",
+                help="Cargo requires engineer, Military - soldier, etc.",
             )
 
-            # 2. Назва моделі
             model_name = st.text_input(
-                "Назва моделі",
+                "Model Name",
                 placeholder="Super Tanker 3000",
-                help="Введіть зрозумілу назву.",
+                help="Enter descriptive name.",
             )
 
-            # 3. Автогенерація коду (візуалізація)
             auto_code = ""
             if model_name:
                 slug = generate_slug(model_name)
                 auto_code = f"{base_code}_{slug}"
-                st.caption(f"🔒 Технічний код буде згенеровано автоматично: **`{auto_code}`**")
+                st.caption(f"🔒 Technical code will be auto-generated: **`{auto_code}`**")
             else:
-                st.caption("🔒 Технічний код буде згенеровано після введення назви.")
+                st.caption("🔒 Technical code will be generated after entering name.")
 
-            description = st.text_area("Опис (опційно)", placeholder="Опис характеристик...")
+            description = st.text_area("Description (optional)", placeholder="Describe characteristics...")
 
-            if st.form_submit_button("Створити модель"):
+            if st.form_submit_button("Create Model"):
                 if not model_name.strip():
-                    st.error("Введіть назву моделі.")
+                    st.error("Enter model name.")
                 elif not generate_slug(model_name):
-                    st.error("Назва повинна містити хоча б одну латинську літеру або цифру.")
+                    st.error("Name must contain at least one latin letter or digit.")
                 else:
                     api.api_post(
                         "/api/ship-types",
@@ -277,87 +296,80 @@ elif tab == "📋 Моделі Кораблів":
                             "name": model_name.strip(),
                             "description": description,
                         },
-                        success_msg=f"Модель '{model_name}' створено (код: {auto_code}).",
+                        success_msg=f"Model '{model_name}' created (code: {auto_code}).",
                     )
 
-    # --------- UPDATE MODEL ---------
-    elif crud == "🛠️ Оновити модель":
+    elif crud == "🛠️ Update Model":
         if types_df.empty:
-            st.info("Немає моделей.")
+            st.info("No models.")
         else:
             def model_label(tid):
                 r = types_df[types_df["id"] == tid].iloc[0]
                 return f"{r.get('name')} (id={tid})"
 
-            tid = st.selectbox("Оберіть модель", types_df["id"].tolist(), format_func=model_label)
+            tid = st.selectbox("Select Model", types_df["id"].tolist(), format_func=model_label)
             row = types_df[types_df["id"] == tid].iloc[0]
 
             with st.form("upd_mod"):
-                st.info(f"Редагування моделі: **{row.get('name')}**")
-                # Код міняти не даємо, бо це зламає існуючі кораблі
-                st.text_input("Технічний код (незмінний)", value=str(row.get('code')), disabled=True)
+                st.info(f"Editing model: **{row.get('name')}**")
+                st.text_input("Technical code (unchangeable)", value=str(row.get('code')), disabled=True)
                 
-                new_name = st.text_input("Назва моделі", value=str(row.get('name', '')))
-                new_desc = st.text_area("Опис", value=str(row.get('description', '')))
+                new_name = st.text_input("Model Name", value=str(row.get('name', '')))
+                new_desc = st.text_area("Description", value=str(row.get('description', '')))
 
-                if st.form_submit_button("Зберегти зміни"):
+                if st.form_submit_button("Save Changes"):
                     if new_name.strip():
                         api.api_put(
                             f"/api/ship-types/{tid}",
                             {
-                                "code": str(row.get('code')), # старий код
+                                "code": str(row.get('code')), # old code
                                 "name": new_name.strip(),
                                 "description": new_desc
                             },
-                            success_msg="Модель оновлено."
+                            success_msg="Model updated."
                         )
                     else:
-                        st.error("Назва не може бути порожньою.")
+                        st.error("Name cannot be empty.")
 
-    # --------- DELETE MODEL ---------
-    elif crud == "❌ Видалити модель":
+    elif crud == "❌ Delete Model":
         if types_df.empty:
-            st.info("Немає моделей.")
+            st.info("No models.")
         else:
             def model_label2(tid):
                 r = types_df[types_df["id"] == tid].iloc[0]
                 return f"{r.get('name')} (id={tid})"
 
-            tid = st.selectbox("Модель для видалення", types_df["id"].tolist(), format_func=model_label2, key="del_mod")
+            tid = st.selectbox("Model to Delete", types_df["id"].tolist(), format_func=model_label2, key="del_mod")
             row = types_df[types_df["id"] == tid].iloc[0]
             name = str(row.get("name"))
 
-            st.warning("Видалення моделі зламає кораблі, які її використовують!", icon="⚠️")
+            st.warning("Deleting model will break ships that use it!", icon="⚠️")
             
-            if st.button(f"❌ Видалити '{name}'", type="primary"):
-                api.api_del(f"/api/ship-types/{tid}", success_msg=f"Модель '{name}' видалено.")# Append this to the end of 5_Admin_Data.py
+            if st.button(f"❌ Delete '{name}'", type="primary"):
+                api.api_del(f"/api/ship-types/{tid}", success_msg=f"Model '{name}' deleted.")
 
-# -------------------------------------------------------------------
-#                     ІМПОРТ РЕАЛЬНИХ ДАНИХ
-# -------------------------------------------------------------------
-elif tab == "📥 Імпорт реальних даних":
-    st.subheader("📥 Імпорт реальних даних про кораблі та порти")
+elif tab == "📥 Import Real Data":
+    st.subheader("📥 Import Real Ship and Port Data")
     
     st.markdown("""
-    **Доступні джерела:**
-    - 🚢 **Кораблі:** Dataset з Kaggle/GitHub
-    - ⚓ **Порти:** OpenStreetMap Nominatim (безкоштовно)
-    - 🌍 **Координати:** автоматичне геокодування
+    **Available Sources:**
+    - 🚢 **Ships:** Dataset from Kaggle/GitHub
+    - ⚓ **Ports:** OpenStreetMap Nominatim (free)
+    - 🌍 **Coordinates:** automatic geocoding
     """)
 
     import_tab = api.sticky_tabs(
-        ["🚢 Імпорт кораблів (CSV)", "⚓ Імпорт портів (CSV)", "🌍 Геокодування портів"],
+        ["🚢 Import Ships (CSV)", "⚓ Import Ports (CSV)", "🌍 Geocode Ports"],
         "import_data_tabs",
     )
 
-    # --------- ІМПОРТ КОРАБЛІВ ---------
-    if import_tab == "🚢 Імпорт кораблів (CSV)":
-        st.markdown("### Завантажити кораблі з CSV файлу")
+    if import_tab == "🚢 Import Ships (CSV)":
+        st.markdown("### Upload Ships from CSV File")
         
         st.markdown("""
-        **Формат CSV:** `name,type,country,port_name,company_name`
+        **CSV Format:** `name,type,country,port_name,company_name`
         
-        **Приклад:**
+        **Example:**
         ```
         Ever Given,cargo,Egypt,Port Said,Evergreen Marine
         Titanic II,passenger,USA,Miami,White Star Line
@@ -366,7 +378,7 @@ elif tab == "📥 Імпорт реальних даних":
         """)
         
         uploaded_ships = st.file_uploader(
-            "Виберіть CSV файл з кораблями",
+            "Select CSV file with ships",
             type=["csv"],
             key="upload_ships",
         )
@@ -375,36 +387,34 @@ elif tab == "📥 Імпорт реальних даних":
             try:
                 ships_import_df = pd.read_csv(uploaded_ships)
                 
-                st.markdown("**Попередній перегляд:**")
+                st.markdown("**Preview:**")
                 st.dataframe(ships_import_df.head(10), use_container_width=True)
                 
                 required_cols = ["name", "type", "country"]
                 missing = [c for c in required_cols if c not in ships_import_df.columns]
                 
                 if missing:
-                    st.error(f"❌ Відсутні обов'язкові колонки: {', '.join(missing)}")
+                    st.error(f"❌ Missing required columns: {', '.join(missing)}")
                 else:
-                    st.success(f"✅ Знайдено {len(ships_import_df)} кораблів для імпорту")
+                    st.success(f"✅ Found {len(ships_import_df)} ships for import")
                     
-                    # Map port names to IDs
                     ports_df_local = api.get_ports()
                     port_name_to_id = {}
                     if not ports_df_local.empty and "name" in ports_df_local.columns:
                         port_name_to_id = dict(zip(ports_df_local["name"], ports_df_local["id"]))
                     
-                    # Map company names to IDs
                     companies_df = api.get_companies()
                     company_name_to_id = {}
                     if not companies_df.empty and "name" in companies_df.columns:
                         company_name_to_id = dict(zip(companies_df["name"], companies_df["id"]))
                     
                     default_port = st.selectbox(
-                        "Порт за замовчуванням (якщо не вказано у CSV)",
-                        list(port_name_to_id.keys()) if port_name_to_id else ["Немає портів"],
+                        "Default port (if not specified in CSV)",
+                        list(port_name_to_id.keys()) if port_name_to_id else ["No ports"],
                         key="default_port_ships",
                     )
                     
-                    if st.button("🚢 Імпортувати всі кораблі", type="primary"):
+                    if st.button("🚢 Import All Ships", type="primary"):
                         success_count = 0
                         error_count = 0
                         
@@ -421,11 +431,9 @@ elif tab == "📥 Імпорт реальних даних":
                                 ship_type = str(row.get("type", "cargo")).strip()
                                 ship_country = str(row.get("country", "Unknown")).strip()
                                 
-                                # Resolve port
                                 port_name = str(row.get("port_name", "")).strip()
                                 port_id = port_name_to_id.get(port_name, port_name_to_id.get(default_port, 0))
                                 
-                                # Resolve company
                                 company_name = str(row.get("company_name", "")).strip()
                                 company_id = company_name_to_id.get(company_name, 0)
                                 
@@ -446,24 +454,23 @@ elif tab == "📥 Імпорт реальних даних":
                             
                             progress = (idx + 1) / len(ships_import_df)
                             progress_bar.progress(progress)
-                            status_text.text(f"Імпортовано: {success_count}, помилок: {error_count}")
+                            status_text.text(f"Imported: {success_count}, errors: {error_count}")
                         
-                        st.success(f"✅ Імпорт завершено! Успішно: {success_count}, помилок: {error_count}")
+                        st.success(f"✅ Import complete! Success: {success_count}, errors: {error_count}")
                         if success_count > 0:
                             api.clear_all_caches()
                             st.rerun()
                         
             except Exception as e:
-                st.error(f"Помилка читання CSV: {e}")
+                st.error(f"Error reading CSV: {e}")
 
-    # --------- ІМПОРТ ПОРТІВ ---------
-    elif import_tab == "⚓ Імпорт портів (CSV)":
-        st.markdown("### Завантажити порти з CSV файлу")
+    elif import_tab == "⚓ Import Ports (CSV)":
+        st.markdown("### Upload Ports from CSV File")
         
         st.markdown("""
-        **Формат CSV:** `name,region,lat,lon`
+        **CSV Format:** `name,region,lat,lon`
         
-        **Приклад:**
+        **Example:**
         ```
         Odesa,Europe,46.4825,30.7233
         Rotterdam,Europe,51.9244,4.4777
@@ -473,7 +480,7 @@ elif tab == "📥 Імпорт реальних даних":
         """)
         
         uploaded_ports = st.file_uploader(
-            "Виберіть CSV файл з портами",
+            "Select CSV file with ports",
             type=["csv"],
             key="upload_ports",
         )
@@ -482,18 +489,18 @@ elif tab == "📥 Імпорт реальних даних":
             try:
                 ports_import_df = pd.read_csv(uploaded_ports)
                 
-                st.markdown("**Попередній перегляд:**")
+                st.markdown("**Preview:**")
                 st.dataframe(ports_import_df.head(10), use_container_width=True)
                 
                 required_cols = ["name", "region", "lat", "lon"]
                 missing = [c for c in required_cols if c not in ports_import_df.columns]
                 
                 if missing:
-                    st.error(f"❌ Відсутні обов'язкові колонки: {', '.join(missing)}")
+                    st.error(f"❌ Missing required columns: {', '.join(missing)}")
                 else:
-                    st.success(f"✅ Знайдено {len(ports_import_df)} портів для імпорту")
+                    st.success(f"✅ Found {len(ports_import_df)} ports for import")
                     
-                    if st.button("⚓ Імпортувати всі порти", type="primary"):
+                    if st.button("⚓ Import All Ports", type="primary"):
                         success_count = 0
                         error_count = 0
                         
@@ -522,44 +529,43 @@ elif tab == "📥 Імпорт реальних даних":
                             
                             progress = (idx + 1) / len(ports_import_df)
                             progress_bar.progress(progress)
-                            status_text.text(f"Імпортовано: {success_count}, помилок: {error_count}")
+                            status_text.text(f"Imported: {success_count}, errors: {error_count}")
                         
-                        st.success(f"✅ Імпорт завершено! Успішно: {success_count}, помилок: {error_count}")
+                        st.success(f"✅ Import complete! Success: {success_count}, errors: {error_count}")
                         if success_count > 0:
                             api.clear_all_caches()
                             st.rerun()
                         
             except Exception as e:
-                st.error(f"Помилка читання CSV: {e}")
+                st.error(f"Error reading CSV: {e}")
 
-    # --------- ГЕОКОДУВАННЯ ПОРТІВ ---------
-    elif import_tab == "🌍 Геокодування портів":
-        st.markdown("### Автоматичне отримання координат через OpenStreetMap")
+    elif import_tab == "🌍 Geocode Ports":
+        st.markdown("### Auto-fetch Coordinates via OpenStreetMap")
         
         st.markdown("""
-        **OpenStreetMap Nominatim API** — безкоштовний сервіс для геокодування.
+        **OpenStreetMap Nominatim API** — free geocoding service.
         
-        Введи назви портів, і система автоматично знайде координати.
+        Enter port names and the system will automatically find coordinates.
         """)
         
         port_names_input = st.text_area(
-            "Введи назви портів (кожна назва з нового рядка)",
+            "Enter port names (each name on new line)",
             placeholder="Odesa\nRotterdam\nSingapore\nNew York",
             height=150,
         )
         
-        default_region = st.text_input("Регіон за замовчуванням", value="Unknown")
+        default_region = st.text_input("Default region", value="Unknown")
         
-        if st.button("🌍 Знайти координати та імпортувати", type="primary"):
+        if st.button("🌍 Find Coordinates and Import", type="primary"):
             if not port_names_input.strip():
-                st.warning("Введи хоча б одну назву порту.")
+                st.warning("Enter at least one port name.")
             else:
                 import requests
                 from time import sleep
                 
                 port_lines = [line.strip() for line in port_names_input.strip().split("\n") if line.strip()]
                 
-                st.info(f"Знайдено {len(port_lines)} портів для геокодування...")
+                st.info(f"Found {len(port_lines)} ports for geocoding...")
                 
                 success_count = 0
                 error_count = 0
@@ -570,9 +576,8 @@ elif tab == "📥 Імпорт реальних даних":
                 
                 for idx, port_name in enumerate(port_lines):
                     try:
-                        status_text.text(f"Геокодування: {port_name}...")
+                        status_text.text(f"Geocoding: {port_name}...")
                         
-                        # Nominatim API request
                         url = "https://nominatim.openstreetmap.org/search"
                         params = {
                             "q": f"{port_name} port",
@@ -592,7 +597,6 @@ elif tab == "📥 Імпорт реальних даних":
                             lat = float(data[0]["lat"])
                             lon = float(data[0]["lon"])
                             
-                            # Create port
                             payload = {
                                 "name": port_name,
                                 "region": default_region,
@@ -608,10 +612,9 @@ elif tab == "📥 Імпорт реальних даних":
                             success_count += 1
                         else:
                             with results_container:
-                                st.warning(f"⚠️ {port_name}: не знайдено")
+                                st.warning(f"⚠️ {port_name}: not found")
                             error_count += 1
                         
-                        # Respect rate limit (1 req/sec for Nominatim)
                         sleep(1.1)
                         
                     except Exception as e:
@@ -623,8 +626,202 @@ elif tab == "📥 Імпорт реальних даних":
                     progress_bar.progress(progress)
                 
                 status_text.text("")
-                st.success(f"🎉 Геокодування завершено! Успішно: {success_count}, помилок: {error_count}")
+                st.success(f"🎉 Geocoding complete! Success: {success_count}, errors: {error_count}")
                 
                 if success_count > 0:
                     api.clear_all_caches()
                     st.rerun()
+
+
+elif tab == "📤 Export Data":
+    st.subheader("📤 Export Data to CSV")
+    
+    st.markdown("""
+    **Export database to CSV files** for backup or analysis.
+    
+    You can export:
+    - 🚢 Ships (with all details)
+    - ⚓ Ports (with coordinates)
+    - 👥 People (crew members)
+    - 🏢 Companies
+    - 👨‍✈️ Crew Assignments
+    """)
+    
+    export_tab = api.sticky_tabs(
+        ["🚢 Export Ships", "⚓ Export Ports", "👥 Export People", "🏢 Export Companies", "👨‍✈️ Export Crew"],
+        "export_data_tabs",
+    )
+    
+    if export_tab == "🚢 Export Ships":
+        st.markdown("### 🚢 Export Ships to CSV")
+        
+        try:
+            ships_df = api.get_ships()
+            
+            if ships_df.empty:
+                st.info("No ships to export.")
+            else:
+                st.success(f"Found **{len(ships_df)}** ships")
+                
+                st.markdown("**Preview (first 10 rows):**")
+                st.dataframe(ships_df.head(10), use_container_width=True)
+                
+                csv_data = ships_df.to_csv(index=False)
+                
+                st.download_button(
+                    label="📥 Download Ships CSV",
+                    data=csv_data,
+                    file_name="ships_export.csv",
+                    mime="text/csv",
+                    type="primary",
+                )
+                
+        except Exception as e:
+            st.error(f"Error exporting ships: {e}")
+    
+    elif export_tab == "⚓ Export Ports":
+        st.markdown("### ⚓ Export Ports to CSV")
+        
+        try:
+            ports_df_export = api.get_ports()
+            
+            if ports_df_export.empty:
+                st.info("No ports to export.")
+            else:
+                st.success(f"Found **{len(ports_df_export)}** ports")
+                
+                st.markdown("**Preview:**")
+                st.dataframe(ports_df_export, use_container_width=True)
+                
+                csv_data = ports_df_export.to_csv(index=False)
+                
+                st.download_button(
+                    label="📥 Download Ports CSV",
+                    data=csv_data,
+                    file_name="ports_export.csv",
+                    mime="text/csv",
+                    type="primary",
+                )
+                
+        except Exception as e:
+            st.error(f"Error exporting ports: {e}")
+    
+    elif export_tab == "👥 Export People":
+        st.markdown("### 👥 Export People to CSV")
+        
+        try:
+            people_df = api.get_people()
+            
+            if people_df.empty:
+                st.info("No people to export.")
+            else:
+                st.success(f"Found **{len(people_df)}** people")
+                
+                st.markdown("**Preview (first 10 rows):**")
+                st.dataframe(people_df.head(10), use_container_width=True)
+                
+                csv_data = people_df.to_csv(index=False)
+                
+                st.download_button(
+                    label="📥 Download People CSV",
+                    data=csv_data,
+                    file_name="people_export.csv",
+                    mime="text/csv",
+                    type="primary",
+                )
+                
+        except Exception as e:
+            st.error(f"Error exporting people: {e}")
+    
+    elif export_tab == "🏢 Export Companies":
+        st.markdown("### 🏢 Export Companies to CSV")
+        
+        try:
+            companies_df = api.get_companies()
+            
+            if companies_df.empty:
+                st.info("No companies to export.")
+            else:
+                st.success(f"Found **{len(companies_df)}** companies")
+                
+                st.markdown("**Preview:**")
+                st.dataframe(companies_df, use_container_width=True)
+                
+                csv_data = companies_df.to_csv(index=False)
+                
+                st.download_button(
+                    label="📥 Download Companies CSV",
+                    data=csv_data,
+                    file_name="companies_export.csv",
+                    mime="text/csv",
+                    type="primary",
+                )
+                
+        except Exception as e:
+            st.error(f"Error exporting companies: {e}")
+    
+
+    elif export_tab == "👨‍✈️ Export Crew":
+        st.markdown("### 👨‍✈️ Export Crew Assignments to CSV")
+        
+        st.markdown("""
+        **Crew assignments** show which people are assigned to which ships.
+        """)
+        
+        try:
+            ships_df = api.get_ships()
+            people_df = api.get_people()
+            
+            if ships_df.empty or people_df.empty:
+                st.info("No crew assignments to export.")
+            else:
+                crew_list = []
+                
+                for idx, ship in ships_df.iterrows():
+                    ship_id = ship.get("id")
+                    ship_name = ship.get("name", "")
+                    
+                    try:
+                        crew_df = api.get_ship_crew(ship_id)
+                        
+                        if not crew_df.empty and "person_id" in crew_df.columns:
+                            for idx2, crew_row in crew_df.iterrows():
+                                person_id = crew_row.get("person_id")
+                                
+                                person = people_df[people_df["id"] == person_id]
+                                if not person.empty:
+                                    person_name = person.iloc[0].get("full_name", "")
+                                    person_rank = person.iloc[0].get("rank", "")
+                                    
+                                    crew_list.append({
+                                        "ship_id": ship_id,
+                                        "ship_name": ship_name,
+                                        "person_id": person_id,
+                                        "person_name": person_name,
+                                        "rank": person_rank,
+                                    })
+                    except:
+                        pass
+                
+                if not crew_list:
+                    st.info("No active crew assignments found.")
+                else:
+                    crew_export_df = pd.DataFrame(crew_list)
+                    
+                    st.success(f"Found **{len(crew_export_df)}** crew assignments")
+                    
+                    st.markdown("**Preview (first 10 rows):**")
+                    st.dataframe(crew_export_df.head(10), use_container_width=True)
+                    
+                    csv_data = crew_export_df.to_csv(index=False)
+                    
+                    st.download_button(
+                        label="📥 Download Crew Assignments CSV",
+                        data=csv_data,
+                        file_name="crew_assignments_export.csv",
+                        mime="text/csv",
+                        type="primary",
+                    )
+                
+        except Exception as e:
+            st.error(f"Error exporting crew: {e}")

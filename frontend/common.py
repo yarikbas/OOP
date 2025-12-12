@@ -1,4 +1,3 @@
-# frontend/common.py
 from __future__ import annotations
 
 import os
@@ -9,39 +8,29 @@ import requests
 import pandas as pd
 
 
-# ================== КОНФІГ ==================
+### КОНФІГ
 BASE_URL = os.getenv("FLEET_BASE_URL", "http://127.0.0.1:8082")
 EXPORT_TOKEN = os.getenv("FLEET_EXPORT_TOKEN", "fleet-export-2025")
 
-# Реюз TCP-з'єднань
 _SESSION = requests.Session()
 
-# TTL централізовано
 TTL_SHORT = 3
 TTL_MED = 5
 TTL_LONG = 15
 
 
-# ================== HAVERSINE DISTANCE ==================
+### HAVERSINE DISTANCE
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """
-    Calculate distance between two points on Earth using haversine formula.
-    Returns distance in kilometers.
-    """
-    # Earth radius in km
     R = 6371.0
     
-    # Convert to radians
     lat1_rad = math.radians(lat1)
     lon1_rad = math.radians(lon1)
     lat2_rad = math.radians(lat2)
     lon2_rad = math.radians(lon2)
     
-    # Differences
     dlat = lat2_rad - lat1_rad
     dlon = lon2_rad - lon1_rad
     
-    # Haversine formula
     a = math.sin(dlat / 2)**2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon / 2)**2
     c = 2 * math.asin(math.sqrt(a))
     
@@ -49,10 +38,9 @@ def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
 
 
 
-# ================== ЛОКАЛІЗАЦІЯ ==================
+### ЛОКАЛІЗАЦІЯ
 TRANSLATIONS = {
     "en": {
-        # Common
         "app_title": "Fleet Manager",
         "backend_ok": "Backend: OK",
         "backend_unavailable": "Backend unavailable",
@@ -230,38 +218,16 @@ TRANSLATIONS = {
 }
 
 def get_lang():
-    """Get current language from session state, default to Ukrainian."""
-    if "language" not in st.session_state:
-        st.session_state.language = "uk"
-    return st.session_state.language
+    """Always return English language."""
+    return "en"
 
 def t(key: str) -> str:
-    """Get translation for key in current language."""
-    lang = get_lang()
-    return TRANSLATIONS.get(lang, {}).get(key, key)
-
-def language_selector():
-    """Display language selector in sidebar."""
-    current_lang = get_lang()
-    lang_options = {"🇺🇦 Українська": "uk", "🇬🇧 English": "en"}
-    selected_label = "🇺🇦 Українська" if current_lang == "uk" else "🇬🇧 English"
-    
-    selected = st.sidebar.selectbox(
-        "🌐 Language / Мова",
-        options=list(lang_options.keys()),
-        index=list(lang_options.values()).index(current_lang),
-        key="lang_selector"
-    )
-    
-    new_lang = lang_options[selected]
-    if new_lang != current_lang:
-        st.session_state.language = new_lang
-        st.rerun()
+    """Get translation for key in English."""
+    return TRANSLATIONS.get("en", {}).get(key, key)
 
 
-# ================== THEME / LAYOUT ==================
+### THEME / LAYOUT
 def inject_theme():
-    """Lightweight CSS helpers for consistent, calm UI styling."""
     st.markdown(
         """
         <style>
@@ -313,12 +279,8 @@ def inject_theme():
     )
 
 
-# ================== DATAFRAME HELPERS ==================
+### DATAFRAME HELPERS
 def df_1based(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Повертає копію DataFrame з індексом, що починається з 1.
-    Використовуємо перед st.dataframe, щоб рядки нумерувалися 1,2,3...
-    """
     if df is None or df.empty:
         return df
     df = df.copy()
@@ -327,20 +289,14 @@ def df_1based(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-# ================== КЕШ / ОЧИЩЕННЯ ==================
+### КЕШ / ОЧИЩЕННЯ
 def clear_all_caches():
-    """
-    Викликається після кожної POST/PUT/DELETE дії,
-    щоб змусити UI оновити дані з сервера.
-    """
-    # Найнадійніше: очистка всього cache_data в межах додатку
     try:
         st.cache_data.clear()
         return
     except Exception:
         pass
 
-    # Fallback (на випадок змін у Streamlit)
     for fn in [
         get_ports,
         get_ship_types,
@@ -354,18 +310,17 @@ def clear_all_caches():
         get_active_assignments,
     ]:
         try:
-            fn.clear()  # type: ignore[attr-defined]
+            fn.clear()
         except Exception:
             continue
 
 
-# ================== API ХЕЛПЕРИ (CRUD) ==================
+### API ХЕЛПЕРИ (CRUD)
 def _url(path: str) -> str:
     return BASE_URL + path
 
 
 def _handle_api_error(resp: requests.Response, action: str):
-    """Внутрішній хелпер для обробки помилок API."""
     try:
         data = resp.json()
         msg = data.get("error") or data.get("details") or resp.text
@@ -377,12 +332,6 @@ def _handle_api_error(resp: requests.Response, action: str):
 
 
 def _after_success(success_msg: str, rerun: bool = True):
-    """
-    Викликаємо після успішного POST/PUT/DELETE:
-    - очищаємо кеш;
-    - кладемо повідомлення в session_state;
-    - при потребі робимо st.rerun().
-    """
     clear_all_caches()
     st.session_state["last_success"] = success_msg
     if rerun:
@@ -402,13 +351,10 @@ def api_get(path: str, *, expect_json: bool = True):
     try:
         return resp.json()
     except ValueError:
-        # Деякі ендпоінти (наприклад старий /health) могли повертати plain text.
-        # Повертаємо сирий текст, щоб не падати на JSONDecodeError.
         return {"raw": resp.text}
 
 
 def api_post(path: str, payload: dict, success_msg: str, rerun: bool = True):
-    """СТВОРЕННЯ (CREATE)."""
     url = _url(path)
     resp = _SESSION.post(url, json=payload, timeout=5)
     if not resp.ok:
@@ -442,7 +388,7 @@ def api_del(path: str, success_msg: str, rerun: bool = True):
     return True
 
 
-# ================== КЕШОВАНІ ЧИТАННЯ ==================
+### КЕШОВАНІ ЧИТАННЯ
 @st.cache_data(ttl=TTL_LONG)
 def get_ports() -> pd.DataFrame:
     data = api_get("/api/ports") or []
@@ -473,8 +419,8 @@ def get_people() -> pd.DataFrame:
     return pd.DataFrame(data)
 
 
-@st.cache_data(ttl=TTL_SHORT)
 def get_ship_crew(ship_id: int) -> pd.DataFrame:
+    """Get ship crew without caching to ensure fresh data"""
     if not ship_id:
         return pd.DataFrame()
     data = api_get(f"/api/ships/{ship_id}/crew") or []
@@ -489,14 +435,9 @@ def get_company_ports(company_id: int) -> pd.DataFrame:
     return pd.DataFrame(data)
 
 
-# ================== АКТИВНІ ПРИЗНАЧЕННЯ ==================
+### АКТИВНІ ПРИЗНАЧЕННЯ
 @st.cache_data(ttl=TTL_SHORT)
 def get_active_assignments() -> pd.DataFrame:
-    """
-    Повертає DataFrame активних призначень з колонками:
-    person_id, ship_id, ...
-    Будуємо 1 раз і використовуємо в кількох місцях.
-    """
     ships_df = get_ships()
     if ships_df.empty or "id" not in ships_df.columns:
         return pd.DataFrame(columns=["person_id", "ship_id"])
@@ -511,7 +452,6 @@ def get_active_assignments() -> pd.DataFrame:
         if crew_df.empty or "person_id" not in crew_df.columns:
             continue
 
-        # активні: end_utc == null (якщо колонка є)
         if "end_utc" in crew_df.columns:
             crew_df = crew_df[crew_df["end_utc"].isna()].copy()
 
@@ -526,7 +466,6 @@ def get_active_assignments() -> pd.DataFrame:
 
     merged = pd.concat(rows, ignore_index=True)
 
-    # Гарантуємо потрібні колонки
     for col in ["person_id", "ship_id"]:
         if col not in merged.columns:
             merged[col] = pd.Series(dtype="int64")
@@ -536,7 +475,6 @@ def get_active_assignments() -> pd.DataFrame:
 
 @st.cache_data(ttl=TTL_SHORT)
 def get_all_active_person_ids() -> set[int]:
-    """Будуємо множину person_id, які зараз у якійсь команді."""
     df = get_active_assignments()
     if df.empty or "person_id" not in df.columns:
         return set()
@@ -552,10 +490,6 @@ def get_all_active_person_ids() -> set[int]:
 
 @st.cache_data(ttl=TTL_SHORT)
 def get_active_ship_map() -> dict[int, int]:
-    """
-    Повертає словник {person_id: ship_id}
-    для всіх АКТИВНИХ призначень.
-    """
     df = get_active_assignments()
     if df.empty or not {"person_id", "ship_id"}.issubset(df.columns):
         return {}
@@ -581,9 +515,8 @@ def get_health() -> dict | None:
         return None
 
 
-# ================== ХЕЛПЕРИ ДЛЯ UI ==================
+### ХЕЛПЕРИ ДЛЯ UI
 def get_name_map(df: pd.DataFrame, id_col: str = "id", name_col: str = "name") -> dict:
-    """Створює словник {id: name} з DataFrame."""
     if df.empty or id_col not in df.columns or name_col not in df.columns:
         return {}
     try:
@@ -634,27 +567,13 @@ def get_person_name_map() -> dict[int, str]:
     return out
 
 
-# ================== STICKY TABS ==================
+### STICKY TABS
 def sticky_tabs(labels: list[str], key: str, default: int = 0) -> str:
-    """
-    Липкі вкладки-радіо, які:
-    - НЕ скидаються при selectbox/checkbox
-    - НЕ ламають session_state
-    - переживають rerun
-
-    Повертає назву активної вкладки.
-
-    Використання:
-        tab = api.sticky_tabs(["A", "B", "C"], "unique_key")
-        if tab == "A":
-            ...
-    """
     if not labels:
         return ""
 
     state_key = f"sticky_tab::{key}"
 
-    # Ініціалізуємо ДО створення віджета
     if state_key not in st.session_state:
         if 0 <= default < len(labels):
             st.session_state[state_key] = labels[default]
@@ -667,10 +586,8 @@ def sticky_tabs(labels: list[str], key: str, default: int = 0) -> str:
 
     idx = labels.index(current)
 
-    # key віджета = state_key
-    # Streamlit сам оновить st.session_state[state_key]
     choice = st.radio(
-        label=f"tabs_{key}",  # будь-який НЕпорожній текст
+        label=f"tabs_{key}",
         options=labels,
         index=idx,
         horizontal=True,

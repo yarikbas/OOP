@@ -127,10 +127,10 @@ Db& Db::instance() {
 Db::Db() {
     namespace fs = std::filesystem;
 
-    fs::create_directories("data");
+    fs::path dbPath = fs::current_path().parent_path().parent_path() / "data" / "app.db";
+    fs::create_directories(dbPath.parent_path());
 
-    const char* path = "data/app.db";
-    if (sqlite3_open(path, &db_) != SQLITE_OK) {
+    if (sqlite3_open(dbPath.string().c_str(), &db_) != SQLITE_OK) {
         std::string msg = db_ ? sqlite3_errmsg(db_) : "sqlite open failed";
         throw std::runtime_error(msg);
     }
@@ -293,114 +293,6 @@ void Db::runMigrations() {
         seedPortsIfEmpty(db_);
         seedShipsIfEmpty(db_);
     }
-
-    // --- CARGO ---
-    execOrThrow(db_,
-        "CREATE TABLE IF NOT EXISTS cargo ("
-        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "  name TEXT NOT NULL,"
-        "  type TEXT NOT NULL,"
-        "  weight_tonnes REAL DEFAULT 0,"
-        "  volume_m3 REAL DEFAULT 0,"
-        "  value_usd REAL DEFAULT 0,"
-        "  origin_port_id INTEGER,"
-        "  destination_port_id INTEGER,"
-        "  status TEXT DEFAULT 'pending',"
-        "  ship_id INTEGER,"
-        "  loaded_at TEXT,"
-        "  delivered_at TEXT,"
-        "  notes TEXT,"
-        "  FOREIGN KEY(origin_port_id) REFERENCES ports(id),"
-        "  FOREIGN KEY(destination_port_id) REFERENCES ports(id),"
-        "  FOREIGN KEY(ship_id) REFERENCES ships(id)"
-        ");"
-    );
-    execOrThrow(db_, "CREATE INDEX IF NOT EXISTS idx_cargo_ship ON cargo(ship_id);");
-    execOrThrow(db_, "CREATE INDEX IF NOT EXISTS idx_cargo_status ON cargo(status);");
-
-    // --- VOYAGE RECORDS ---
-    execOrThrow(db_,
-        "CREATE TABLE IF NOT EXISTS voyage_records ("
-        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "  ship_id INTEGER NOT NULL,"
-        "  from_port_id INTEGER NOT NULL,"
-        "  to_port_id INTEGER NOT NULL,"
-        "  departed_at TEXT NOT NULL,"
-        "  arrived_at TEXT,"
-        "  actual_duration_hours REAL DEFAULT 0,"
-        "  planned_duration_hours REAL DEFAULT 0,"
-        "  distance_km REAL DEFAULT 0,"
-        "  fuel_consumed_tonnes REAL DEFAULT 0,"
-        "  total_cost_usd REAL DEFAULT 0,"
-        "  total_revenue_usd REAL DEFAULT 0,"
-        "  cargo_list TEXT,"
-        "  crew_list TEXT,"
-        "  notes TEXT,"
-        "  weather_conditions TEXT,"
-        "  FOREIGN KEY(ship_id) REFERENCES ships(id),"
-        "  FOREIGN KEY(from_port_id) REFERENCES ports(id),"
-        "  FOREIGN KEY(to_port_id) REFERENCES ports(id)"
-        ");"
-    );
-    execOrThrow(db_, "CREATE INDEX IF NOT EXISTS idx_voyage_ship ON voyage_records(ship_id);");
-    execOrThrow(db_, "CREATE INDEX IF NOT EXISTS idx_voyage_dates ON voyage_records(departed_at, arrived_at);");
-
-    // --- VOYAGE EXPENSES ---
-    execOrThrow(db_,
-        "CREATE TABLE IF NOT EXISTS voyage_expenses ("
-        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "  voyage_id INTEGER NOT NULL,"
-        "  fuel_cost_usd REAL DEFAULT 0,"
-        "  port_fees_usd REAL DEFAULT 0,"
-        "  crew_wages_usd REAL DEFAULT 0,"
-        "  maintenance_cost_usd REAL DEFAULT 0,"
-        "  other_costs_usd REAL DEFAULT 0,"
-        "  total_cost_usd REAL DEFAULT 0,"
-        "  notes TEXT,"
-        "  FOREIGN KEY(voyage_id) REFERENCES voyage_records(id) ON DELETE CASCADE"
-        ");"
-    );
-    execOrThrow(db_, "CREATE INDEX IF NOT EXISTS idx_expenses_voyage ON voyage_expenses(voyage_id);");
-
-    // --- SCHEDULES ---
-    execOrThrow(db_,
-        "CREATE TABLE IF NOT EXISTS schedules ("
-        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "  ship_id INTEGER NOT NULL,"
-        "  route_name TEXT NOT NULL,"
-        "  from_port_id INTEGER NOT NULL,"
-        "  to_port_id INTEGER NOT NULL,"
-        "  departure_day_of_week INTEGER DEFAULT 1,"
-        "  departure_time TEXT,"
-        "  is_active INTEGER DEFAULT 1,"
-        "  recurring TEXT DEFAULT 'weekly',"
-        "  notes TEXT,"
-        "  FOREIGN KEY(ship_id) REFERENCES ships(id),"
-        "  FOREIGN KEY(from_port_id) REFERENCES ports(id),"
-        "  FOREIGN KEY(to_port_id) REFERENCES ports(id)"
-        ");"
-    );
-    execOrThrow(db_, "CREATE INDEX IF NOT EXISTS idx_schedules_ship ON schedules(ship_id);");
-    execOrThrow(db_, "CREATE INDEX IF NOT EXISTS idx_schedules_active ON schedules(is_active);");
-
-    // --- WEATHER DATA ---
-    execOrThrow(db_,
-        "CREATE TABLE IF NOT EXISTS weather_data ("
-        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "  port_id INTEGER NOT NULL,"
-        "  timestamp TEXT NOT NULL,"
-        "  temperature_c REAL DEFAULT 0,"
-        "  wind_speed_kmh REAL DEFAULT 0,"
-        "  wind_direction_deg REAL DEFAULT 0,"
-        "  conditions TEXT,"
-        "  visibility_km REAL DEFAULT 10,"
-        "  wave_height_m REAL DEFAULT 0,"
-        "  warnings TEXT,"
-        "  FOREIGN KEY(port_id) REFERENCES ports(id)"
-        ");"
-    );
-    execOrThrow(db_, "CREATE INDEX IF NOT EXISTS idx_weather_port ON weather_data(port_id);");
-    execOrThrow(db_, "CREATE INDEX IF NOT EXISTS idx_weather_timestamp ON weather_data(timestamp);");
 
     // --- LOGS ---
     execOrThrow(db_,
